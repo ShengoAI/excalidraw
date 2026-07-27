@@ -1,9 +1,16 @@
 diff --git a/packages/element/src/binding.ts b/packages/element/src/binding.ts
-index 4f126b52..aa2dc934 100644
+index ede907972..62237d7d2 100644
 --- a/packages/element/src/binding.ts
 +++ b/packages/element/src/binding.ts
-@@ -817,6 +817,11 @@ const getBindingStrategyForDraggingBindingElementEndpoints_simple = (
-               appState.isMidpointSnappingEnabled,
+@@ -872,20 +872,25 @@ const getBindingStrategyForDraggingBindingElementEndpoints_simple = (
+                 : globalPoint,
+               hit,
+               startDragged ? "start" : "end",
+               elementsMap,
+               appState.zoom,
+               appState.isMidpointSnappingEnabled &&
+                 !opts?.angleLocked &&
+                 !appState.gridModeEnabled,
              ) || globalPoint,
          }
 +    : // Preserve existing binding if no hit found (prevents accidental unbind during edit)
@@ -14,3 +21,10 @@ index 4f126b52..aa2dc934 100644
      : { mode: null };
  
    const otherEndpoint = LinearElementEditor.getPointAtIndexGlobalCoordinates(
+     arrow,
+     startDragged ? -1 : 0,
+     elementsMap,
+   );
+   const pointIsCloseToOtherElement =
+     otherFocusPoint &&
+     otherBindableElement &&

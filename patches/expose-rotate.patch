@@ -1,8 +1,15 @@
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index e3ff9119..0194a0ed 100644
+index 0e573219f..8832af15f 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -115,6 +115,7 @@ import {
+@@ -110,20 +110,21 @@ import {
+   setDesktopUIMode,
+   isSelectionLikeTool,
+   oneOf,
+   getStrokeWidthByKey,
+ } from "@excalidraw/common";
+ 
+ import {
    getObservedAppState,
    getCommonBounds,
    getElementAbsoluteCoords,
@@ -10,10 +17,24 @@ index e3ff9119..0194a0ed 100644
    bindOrUnbindBindingElements,
    fixBindingsAfterDeletion,
    getHoveredElementForBinding,
-@@ -770,6 +771,10 @@ class App extends React.Component<AppProps, AppState> {
+   isBindingEnabled,
+   updateBoundElements,
+   LinearElementEditor,
+   newElementWith,
+   newFrameElement,
+   newFreeDrawElement,
+   newEmbeddableElement,
+@@ -774,20 +775,24 @@ class App extends React.Component<AppProps, AppState> {
+       getName: this.getName,
+       registerAction: (action: Action) => {
+         this.actionManager.registerAction(action);
+       },
+       refresh: this.refresh,
+       setToast: this.setToast,
+       id: this.id,
        setActiveTool: this.setActiveTool,
-       setCursor: this.setCursor,
-       resetCursor: this.resetCursor,
+       setCursor: this.cursor.set,
+       resetCursor: this.cursor.reset,
 +      setActiveLinearElement: this.setActiveLinearElement,
 +      refreshTextElementDimensions: this.refreshTextElementDimensions,
 +      rerouteElbowArrow: this.rerouteElbowArrow,
@@ -21,20 +42,51 @@ index e3ff9119..0194a0ed 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -2394,6 +2399,9 @@ class App extends React.Component<AppProps, AppState> {
+       onChange: (cb) => this.onChangeEmitter.on(cb),
+       onIncrement: (cb) => this.store.onStoreIncrementEmitter.on(cb),
+       onPointerDown: (cb) => this.onPointerDownEmitter.on(cb),
+       onPointerUp: (cb) => this.onPointerUpEmitter.on(cb),
+       onScrollChange: (cb) => this.onScrollChangeEmitter.on(cb),
+       onUserFollow: (cb) => this.onUserFollowEmitter.on(cb),
+       onStateChange: this.onStateChange,
+@@ -2611,20 +2616,26 @@ class App extends React.Component<AppProps, AppState> {
+                             selectedElements={selectedElements}
+                             canvasNonce={canvasNonce}
+                             selectionNonce={
+                               this.state.selectionElement?.versionNonce
+                             }
+                             scale={window.devicePixelRatio}
+                             appState={this.state}
                              renderScrollbars={
                                this.props.renderScrollbars === true
                              }
 +                            hideDefaultRotateHandle={
 +                              this.props.hideDefaultRotateHandle === true
 +                            }
++                            getSelectionColorForElement={
++                              this.props.getSelectionColorForElement
++                            }
                              editorInterface={this.editorInterface}
+                             interactionEnabled={this.isInteractionEnabled()}
+                             navigationEnabled={this.isNavigationEnabled()}
                              renderInteractiveSceneCallback={
                                this.renderInteractiveSceneCallback
-@@ -4529,6 +4537,154 @@ class App extends React.Component<AppProps, AppState> {
+                             }
+                             handleCanvasRef={this.handleInteractiveCanvasRef}
+                             onContextMenu={this.handleCanvasContextMenu}
+                             onClick={this.handleCanvasClick}
+                             onPointerMove={this.handleCanvasPointerMove}
+@@ -5126,20 +5137,168 @@ class App extends React.Component<AppProps, AppState> {
+     (files) => {
+       const { addedFiles } = this.addMissingFiles(files);
+ 
+       this.clearImageShapeCache(addedFiles);
+       this.scene.triggerUpdate();
+ 
+       this.addNewImagesToImageCache();
      },
    );
-
+ 
 +  public rotateSelectedElements: ExcalidrawImperativeAPI["rotateSelectedElements"] =
 +    (angleDelta, opts = {}) => {
 +      const selectedElements = this.scene.getSelectedElements(this.state);
@@ -186,61 +238,299 @@ index e3ff9119..0194a0ed 100644
    private addMissingFiles = (
      files: BinaryFiles | BinaryFileData[],
      replace = false,
+   ) => {
+     const nextFiles = replace ? {} : { ...this.files };
+     const addedFiles: BinaryFiles = {};
+ 
+     const _files = Array.isArray(files) ? files : Object.values(files);
+ 
+     for (const fileData of _files) {
 diff --git a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
-index f24e80d6..936e5655 100644
+index f5360e485..7bd1ab0fb 100644
 --- a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
 +++ b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
-@@ -44,6 +44,7 @@ type InteractiveCanvasProps = {
+@@ -36,20 +36,22 @@ type InteractiveCanvasProps = {
+   canvas: HTMLCanvasElement | null;
+   elementsMap: RenderableElementsMap;
+   visibleElements: readonly NonDeletedExcalidrawElement[];
+   selectedElements: readonly NonDeletedExcalidrawElement[];
+   allElementsMap: NonDeletedSceneElementsMap;
+   canvasNonce: string;
+   selectionNonce: number | undefined;
    scale: number;
    appState: InteractiveCanvasAppState;
    renderScrollbars: boolean;
++  getSelectionColorForElement?: InteractiveCanvasRenderConfig["getSelectionColorForElement"];
 +  hideDefaultRotateHandle: boolean;
    editorInterface: EditorInterface;
    app: AppClassProperties;
+   interactionEnabled: boolean;
+   navigationEnabled: boolean;
    renderInteractiveSceneCallback: (
-@@ -159,6 +160,7 @@ const InteractiveCanvas = (props: InteractiveCanvasProps) => {
+     data: RenderInteractiveSceneCallback,
+   ) => void;
+   handleCanvasRef: (canvas: HTMLCanvasElement | null) => void;
+   onContextMenu: Exclude<
+     DOMAttributes<HTMLCanvasElement | HTMLDivElement>["onContextMenu"],
+@@ -153,20 +155,22 @@ const InteractiveCanvas = (props: InteractiveCanvasProps) => {
+       scale: window.devicePixelRatio,
+       appState: props.appState,
+       renderConfig: {
+         remotePointerViewportCoords,
+         remotePointerButton,
+         remoteSelectedElementIds,
+         remotePointerUsernames,
          remotePointerUserStates,
          selectionColor,
          renderScrollbars: props.renderScrollbars,
++        getSelectionColorForElement: props.getSelectionColorForElement,
 +        hideDefaultRotateHandle: props.hideDefaultRotateHandle,
          // NOTE not memoized on so we don't rerender on cursor move
-         lastViewportPosition: props.app.lastViewportPosition,
+         lastViewportPosition: props.app.viewport.lastPosition,
        },
-@@ -287,7 +289,8 @@ const areEqual = (
+       editorInterface: props.editorInterface,
+       callback: props.renderInteractiveSceneCallback,
+       animationState: {
+         bindingHighlight: undefined,
+       },
+       deltaTime: 0,
+     };
+@@ -285,20 +289,23 @@ const areEqual = (
+     prevProps.selectionNonce !== nextProps.selectionNonce ||
+     prevProps.canvasNonce !== nextProps.canvasNonce ||
+     prevProps.scale !== nextProps.scale ||
+     // we need to memoize on elementsMap because they may have renewed
+     // even if canvasNonce didn't change (e.g. we filter elements out based
+     // on appState)
      prevProps.elementsMap !== nextProps.elementsMap ||
      prevProps.visibleElements !== nextProps.visibleElements ||
      prevProps.selectedElements !== nextProps.selectedElements ||
--    prevProps.renderScrollbars !== nextProps.renderScrollbars
-+    prevProps.renderScrollbars !== nextProps.renderScrollbars ||
-+    prevProps.hideDefaultRotateHandle !== nextProps.hideDefaultRotateHandle
+     prevProps.renderScrollbars !== nextProps.renderScrollbars ||
++    prevProps.hideDefaultRotateHandle !== nextProps.hideDefaultRotateHandle ||
++    prevProps.getSelectionColorForElement !==
++      nextProps.getSelectionColorForElement ||
+     prevProps.interactionEnabled !== nextProps.interactionEnabled ||
+     prevProps.navigationEnabled !== nextProps.navigationEnabled
    ) {
      return false;
    }
+ 
+   // Comparing the interactive appState for changes in case of some edge cases
+   return isShallowEqual(
+     // asserting AppState because we're being passed the whole AppState
+     // but resolve to only the InteractiveCanvas-relevant props
 diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
-index a680912b..dfed2055 100644
+index 240743cb4..58c098771 100644
 --- a/packages/excalidraw/index.tsx
 +++ b/packages/excalidraw/index.tsx
-@@ -103,6 +103,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+@@ -102,20 +102,22 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+     onPointerDown,
+     onPointerUp,
+     onScrollChange,
+     onDuplicate,
+     children,
+     validateEmbeddable,
+     renderEmbeddable,
      aiEnabled,
      showDeprecatedFonts,
      renderScrollbars,
++    getSelectionColorForElement,
 +    hideDefaultRotateHandle,
      imageOptions,
    } = props;
-
-@@ -221,6 +222,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+ 
+   const canvasActions = props.UIOptions?.canvasActions;
+ 
+   // FIXME normalize/set defaults in parent component so that the memo resolver
+   // compares the same values
+   const UIOptions: AppProps["UIOptions"] = {
+     ...props.UIOptions,
+     canvasActions: {
+@@ -238,20 +240,22 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+           generateLinkForSelection={generateLinkForSelection}
+           onPointerDown={onPointerDown}
+           onPointerUp={onPointerUp}
+           onScrollChange={onScrollChange}
+           onDuplicate={onDuplicate}
+           validateEmbeddable={validateEmbeddable}
+           renderEmbeddable={renderEmbeddable}
            aiEnabled={aiEnabled !== false}
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
++          getSelectionColorForElement={getSelectionColorForElement}
 +          hideDefaultRotateHandle={hideDefaultRotateHandle}
            imageOptions={normalizedImageOptions}
          >
            {children}
+         </App>
+       </InitializeApp>
+     </EditorJotaiProvider>
+   );
+ };
+ 
+ const areEqual = (prevProps: ExcalidrawProps, nextProps: ExcalidrawProps) => {
 diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
-index a324a3ac..92560cea 100644
+index 31a6ca888..06a4f094b 100644
 --- a/packages/excalidraw/renderer/interactiveScene.ts
 +++ b/packages/excalidraw/renderer/interactiveScene.ts
-@@ -1901,7 +1901,10 @@ const _renderInteractiveScene = ({
+@@ -1512,22 +1512,22 @@ const renderTextBox = (
+   const width = text.width + padding * 2;
+   const height = text.height + padding * 2;
+   const cx = text.x + text.width / 2;
+   const cy = text.y + text.height / 2;
+   const shiftX = -(text.width / 2 + padding);
+   const shiftY = -(text.height / 2 + padding);
+   context.translate(cx + appState.scrollX, cy + appState.scrollY);
+   context.rotate(text.angle);
+   context.lineWidth = 1 / appState.zoom.value;
+   context.strokeStyle = selectionColor;
+-  context.globalAlpha = 0.5;
+-  context.setLineDash([6 / appState.zoom.value, 4 / appState.zoom.value]);
++  context.globalAlpha = 1.0;
++  context.setLineDash([]);
+   context.strokeRect(shiftX, shiftY, width, height);
+   context.restore();
+ };
+ 
+ const renderResetAutoResizeHandle = (
+   text: ExcalidrawTextElement,
+   context: CanvasRenderingContext2D,
+   appState: InteractiveCanvasAppState,
+   selectionColor: InteractiveCanvasRenderConfig["selectionColor"],
+   formFactor: EditorInterface["formFactor"],
+@@ -1645,29 +1645,69 @@ const _renderInteractiveScene = ({
+       activeTextElement,
+       context,
+       appState,
+       renderConfig.selectionColor,
+       editorInterface.formFactor,
+     );
+   }
+ 
+   if (appState.editingTextElement) {
+     const textElement = allElementsMap.get(appState.editingTextElement.id) as
+-      | ExcalidrawTextElement
++      | NonDeleted<ExcalidrawTextElement>
+       | undefined;
+-    if (textElement && !textElement.autoResize) {
++    if (textElement) {
++      // Use custom color from getSelectionColorForElement if available
++      const customColor = renderConfig.getSelectionColorForElement?.(
++        textElement,
++        allElementsMap,
++        appState,
++      );
++      const textColor = customColor || renderConfig.selectionColor;
++
+       renderTextBox(
+         textElement,
+         context,
+         appState,
+-        renderConfig.selectionColor,
++        textColor,
+       );
++
++      // Render transform handles for editing text element
++      if (!appState.viewModeEnabled && !appState.croppingElementId) {
++        context.save();
++        context.translate(appState.scrollX, appState.scrollY);
++        context.fillStyle = "#fff";
++        const transformHandles = getTransformHandles(
++          textElement,
++          appState.zoom,
++          elementsMap,
++          "mouse",
++          {
++            ...getOmitSidesForEditorInterface(editorInterface),
++            rotation: renderConfig.hideDefaultRotateHandle,
++          },
++        );
++
++        // Create a custom renderConfig with the text color for transform handles
++        const customRenderConfig = {
++          ...renderConfig,
++          selectionColor: textColor,
++        };
++
++        renderTransformHandles(
++          context,
++          customRenderConfig,
++          appState,
++          transformHandles,
++          textElement.angle,
++        );
++        context.restore();
++      }
+     }
+   }
+ 
+   if (appState.isBindingEnabled && appState.suggestedBinding) {
+     nextAnimationState = {
+       ...animationState,
+       bindingHighlight: renderBindingHighlightForBindableElement(
+         app,
+         context,
+         appState.suggestedBinding,
+@@ -1821,21 +1861,27 @@ const _renderInteractiveScene = ({
+               isElbowArrow(element) &&
+               (element.startBinding || element.endBinding)
+             )
+           )
+         ) {
+           // local user
+           if (
+             locallySelectedIds.has(element.id) &&
+             !isSelectedViaGroup(appState, element)
+           ) {
+-            selectionColors.push(selectionColor);
++            selectionColors.push(
++              renderConfig.getSelectionColorForElement?.(
++                element,
++                allElementsMap,
++                appState,
++              ) || selectionColor,
++            );
+           }
+           // remote users
+           if (remoteClients) {
+             selectionColors.push(
+               ...remoteClients.map((socketId) => {
+                 const background = getClientColor(
+                   socketId,
+                   appState.collaborators.get(socketId),
+                 );
+                 return background;
+@@ -1876,21 +1922,21 @@ const _renderInteractiveScene = ({
+         const groupElements = getElementsInGroup(elementsMap, groupId);
+         const [x1, y1, x2, y2] = getCommonBounds(groupElements);
+         selections.push({
+           angle: 0,
+           x1,
+           x2,
+           y1,
+           y2,
+           selectionColors: groupElements.some((el) => el.locked)
+             ? ["#ced4da"]
+-            : ["#000"],
++            : [selectionColor],
+           dashed: true,
+           cx: x1 + (x2 - x1) / 2,
+           cy: y1 + (y2 - y1) / 2,
+           activeEmbeddable: false,
+         });
+       };
+ 
+       for (const groupId of getSelectedGroupIds(appState)) {
+         // TODO: support multiplayer selected group IDs
+         addSelectionForGroupId(groupId);
+@@ -1908,27 +1954,28 @@ const _renderInteractiveScene = ({
+     context.save();
+     context.translate(appState.scrollX, appState.scrollY);
+ 
+     if (selectedElements.length === 1) {
+       context.fillStyle = "#fff";
+       const transformHandles = getTransformHandles(
+         selectedElements[0],
          appState.zoom,
          elementsMap,
          "mouse", // when we render we don't know which pointer type so use mouse,
@@ -252,7 +542,27 @@ index a324a3ac..92560cea 100644
        );
        if (
          !appState.viewModeEnabled &&
-@@ -1959,17 +1962,27 @@ const _renderInteractiveScene = ({
+         showBoundingBox &&
+-        // do not show transform handles when text is being edited
+-        !isTextElement(appState.editingTextElement) &&
+         // do not show transform handles when image is being cropped
+         !appState.croppingElementId
+       ) {
+         renderTransformHandles(
+           context,
+           renderConfig,
+           appState,
+           transformHandles,
+           selectedElements[0].angle,
+         );
+@@ -1966,31 +2013,41 @@ const _renderInteractiveScene = ({
+         x1 - dashedLinePadding,
+         y1 - dashedLinePadding,
+         x2 - x1 + dashedLinePadding * 2,
+         y2 - y1 + dashedLinePadding * 2,
+         (x1 + x2) / 2,
+         (y1 + y2) / 2,
+         0,
        );
        context.lineWidth = lineWidth;
        context.setLineDash(initialLineDash);
@@ -286,43 +596,127 @@ index a324a3ac..92560cea 100644
        );
        if (selectedElements.some((element) => !element.locked)) {
          renderTransformHandles(
+           context,
+           renderConfig,
+           appState,
+           transformHandles,
+           0,
+         );
+       }
 diff --git a/packages/excalidraw/scene/types.ts b/packages/excalidraw/scene/types.ts
-index ed28327a..41977b7b 100644
+index a98dc884d..c6f59a518 100644
 --- a/packages/excalidraw/scene/types.ts
 +++ b/packages/excalidraw/scene/types.ts
-@@ -70,6 +70,7 @@ export type InteractiveCanvasRenderConfig = {
+@@ -63,23 +63,29 @@ export type SVGRenderConfig = {
+ 
+ export type InteractiveCanvasRenderConfig = {
+   // collab-related state
+   // ---------------------------------------------------------------------------
+   remoteSelectedElementIds: Map<ExcalidrawElement["id"], SocketId[]>;
+   remotePointerViewportCoords: Map<SocketId, { x: number; y: number }>;
+   remotePointerUserStates: Map<SocketId, UserIdleState>;
+   remotePointerUsernames: Map<SocketId, string>;
+   remotePointerButton: Map<SocketId, string | undefined>;
+   selectionColor: string;
++  getSelectionColorForElement?: (
++    element: NonDeletedExcalidrawElement,
++    allElementsMap: NonDeletedSceneElementsMap,
++    appState: InteractiveCanvasAppState,
++  ) => string | null | undefined;
    lastViewportPosition: { x: number; y: number };
    // extra options passed to the renderer
    // ---------------------------------------------------------------------------
 +  hideDefaultRotateHandle?: boolean;
    renderScrollbars?: boolean;
  };
-
+ 
+ export type RenderInteractiveSceneCallback = {
+   scrollBars?: ScrollBars;
+ };
+ 
+ export type StaticSceneRenderConfig = {
+   canvas: HTMLCanvasElement;
+   rc: RoughCanvas;
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 946d822e..a93a8530 100644
+index 3162e5903..15768b78a 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -47,7 +47,7 @@ import type {
+@@ -28,35 +28,36 @@ import type {
+   ExcalidrawEmbeddableElement,
+   ExcalidrawMagicFrameElement,
+   ExcalidrawFrameLikeElement,
+   ExcalidrawElementType,
+   ExcalidrawIframeLikeElement,
+   OrderedExcalidrawElement,
+   ExcalidrawNonSelectionElement,
+   BindMode,
+   ExcalidrawTextElement,
+   StrokeVariability,
++  NonDeletedSceneElementsMap,
+ } from "@excalidraw/element/types";
+ 
+ import type {
+   Merge,
+   MaybePromise,
+   ValueOf,
+   MakeBrand,
+ } from "@excalidraw/common/utility-types";
+ 
+ import type {
+   CaptureUpdateActionType,
    DurableIncrement,
    EphemeralIncrement,
  } from "@excalidraw/element";
 -import type { GlobalPoint } from "@excalidraw/math";
 +import type { GlobalPoint, Radians } from "@excalidraw/math";
-
+ 
  import type { Action } from "./actions/types";
  import type { Spreadsheet } from "./charts";
-@@ -684,6 +684,7 @@ export interface ExcalidrawProps {
+ import type { ClipboardData } from "./clipboard";
+ import type App from "./components/App";
+ import type Library from "./data/library";
+ import type { ContextMenuItems } from "./components/ContextMenu";
+ import type { SnapLine } from "./snapping";
+ import type { ImportedDataState } from "./data/types";
+ import type { SetViewportOptions } from "./viewport";
+@@ -914,20 +915,26 @@ export interface ExcalidrawProps {
+     | string[]
+     | RegExp
+     | RegExp[]
+     | ((link: string) => boolean | undefined);
+   renderEmbeddable?: (
+     element: NonDeleted<ExcalidrawEmbeddableElement>,
+     appState: AppState,
    ) => JSX.Element | null;
    aiEnabled?: boolean;
    showDeprecatedFonts?: boolean;
 +  hideDefaultRotateHandle?: boolean;
++  getSelectionColorForElement?: (
++    element: NonDeletedExcalidrawElement,
++    allElementsMap: NonDeletedSceneElementsMap,
++    appState: InteractiveCanvasAppState,
++  ) => string | null | undefined;
    renderScrollbars?: boolean;
    /**
     * Called before exporting to a file.
-@@ -970,6 +971,19 @@ export interface ExcalidrawImperativeAPI {
+    *
+    * Allows the host app to intercept and delay saving until async operations
+    * (e.g., images are loaded) complete.
+    *
+    * If Promise/AsyncGenerator is returned, a progress toast will be shown
+    * until the operation completes. Generator can yield progress updates.
+    */
+@@ -1211,20 +1218,33 @@ export interface ExcalidrawImperativeAPI {
+   setViewport: InstanceType<typeof App>["viewport"]["setViewport"];
+   getViewportOffsets: InstanceType<typeof App>["viewport"]["getOffsets"];
+   registerAction: (action: Action) => void;
+   refresh: InstanceType<typeof App>["refresh"];
+   setToast: InstanceType<typeof App>["setToast"];
+   addFiles: (data: BinaryFileData[]) => void;
+   id: string;
    setActiveTool: InstanceType<typeof App>["setActiveTool"];
-   setCursor: InstanceType<typeof App>["setCursor"];
-   resetCursor: InstanceType<typeof App>["resetCursor"];
+   setCursor: InstanceType<typeof App>["cursor"]["set"];
+   resetCursor: InstanceType<typeof App>["cursor"]["reset"];
 +  rotateSelectedElements: (
 +    angleDelta: Radians,
 +    opts?: {
@@ -339,3 +733,10 @@ index 946d822e..a93a8530 100644
    toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
    getEditorInterface: () => EditorInterface;
    /**
+    * Disables rendering of frames (including element clipping), but currently
+    * the frames are still interactive in edit mode. As such, this API should be
+    * used in conjunction with view mode (props.viewModeEnabled).
+    */
+   updateFrameRendering: InstanceType<typeof App>["updateFrameRendering"];
+   onChange: (
+     callback: (

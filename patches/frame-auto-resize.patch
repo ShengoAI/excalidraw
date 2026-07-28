@@ -1,8 +1,144 @@
+diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
+index 38afdceab..4802bf9cb 100644
+--- a/packages/element/src/dragElements.ts
++++ b/packages/element/src/dragElements.ts
+@@ -72,14 +72,27 @@ export const dragSelectedElements = (
+   const elementsToUpdate = new Set<NonDeletedExcalidrawElement>(
+     selectedElements,
+   );
+-  const frames = selectedElements
+-    .filter((e) => isFrameLikeElement(e))
+-    .map((f) => f.id);
+-
+-  if (frames.length > 0) {
+-    for (const element of scene.getNonDeletedElements()) {
+-      if (element.frameId !== null && frames.includes(element.frameId)) {
+-        elementsToUpdate.add(element);
++  const frames = new Set(
++    selectedElements.filter((e) => isFrameLikeElement(e)).map((f) => f.id),
++  );
++
++  if (frames.size > 0) {
++    // Recursively collect all descendant frames and their children
++    // This handles nested frames - when dragging a parent frame,
++    // all child frames and their contents should move too
++    let foundNewFrames = true;
++    while (foundNewFrames) {
++      foundNewFrames = false;
++      for (const element of scene.getNonDeletedElements()) {
++        if (element.frameId !== null && frames.has(element.frameId)) {
++          elementsToUpdate.add(element);
++          // If this element is also a frame, add it to the frames set
++          // so we can find its children in the next iteration
++          if (isFrameLikeElement(element) && !frames.has(element.id)) {
++            frames.add(element.id);
++            foundNewFrames = true;
++          }
++        }
+       }
+     }
+   }
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf285..52d3da050 100644
+index bc2cdf285..b25bcf103 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -919,6 +919,11 @@ export const shouldApplyFrameClip = (
+@@ -95,11 +95,11 @@ export const getElementsCompletelyInFrame = (
+   frame: ExcalidrawFrameLikeElement,
+   elementsMap: ElementsMap,
+ ) =>
+-  omitGroupsContainingFrameLikes(
+-    getElementsWithinSelection(elements, frame, elementsMap, false),
+-  ).filter(
++  getElementsWithinSelection(elements, frame, elementsMap, false).filter(
+     (element) =>
+-      (!isFrameLikeElement(element) && !element.frameId) ||
++      // allow elements (including frames) that have no parent frame or belong to this frame
++      // but don't include the frame itself
++      (element.id !== frame.id && !element.frameId) ||
+       element.frameId === frame.id,
+   );
+ 
+@@ -444,6 +444,30 @@ export const getContainingFrame = (
+     null) as null | ExcalidrawFrameLikeElement;
+ };
+ 
++/**
++ * Returns all ancestor frames of an element, from innermost (direct parent) to outermost.
++ * Used for nested frame clipping - elements should be clipped by all ancestor frames.
++ */
++export const getAncestorFrames = (
++  element: ExcalidrawElement,
++  elementsMap: ElementsMap,
++): ExcalidrawFrameLikeElement[] => {
++  const ancestors: ExcalidrawFrameLikeElement[] = [];
++  let current: ExcalidrawElement | null = element;
++
++  while (current?.frameId) {
++    const parent = elementsMap.get(current.frameId);
++    if (parent && isFrameLikeElement(parent)) {
++      ancestors.push(parent);
++      current = parent;
++    } else {
++      break;
++    }
++  }
++
++  return ancestors;
++};
++
+ // --------------------------- Frame Operations -------------------------------
+ 
+ /** */
+@@ -466,11 +490,13 @@ export const filterElementsEligibleAsFrameChildren = (
+   const eligibleElements: ExcalidrawElement[] = [];
+ 
+   for (const element of elements) {
+-    // don't add frames or their children
+-    if (
+-      isFrameLikeElement(element) ||
+-      (element.frameId && otherFrames.has(element.frameId))
+-    ) {
++    // don't add elements that already belong to other frames
++    // (but allow frames to be nested inside other frames)
++    if (element.frameId && otherFrames.has(element.frameId)) {
++      continue;
++    }
++    // don't add a frame to itself
++    if (isFrameLikeElement(element) && element.id === frame.id) {
+       continue;
+     }
+ 
+@@ -566,11 +592,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+     allElements,
+     elementsToAdd,
+   )) {
+-    // don't add frames or their children
+-    if (
+-      isFrameLikeElement(element) ||
+-      (element.frameId && otherFrames.has(element.frameId))
+-    ) {
++    // don't add elements that already belong to other frames
++    // (but allow frames to be nested inside other frames)
++    if (element.frameId && otherFrames.has(element.frameId)) {
++      continue;
++    }
++    // don't add a frame to itself
++    if (isFrameLikeElement(element) && element.id === frame.id) {
+       continue;
+     }
+ 
+@@ -725,9 +753,9 @@ export const updateFrameMembershipOfSelectedElements = <
+   const elementsMap = arrayToMap(allElements);
+ 
+   elementsToFilter.forEach((element) => {
++    // Check if element (including nested frames) should be removed from its parent frame
+     if (
+       element.frameId &&
+-      !isFrameLikeElement(element) &&
+       !isElementInFrame(element, elementsMap, appState)
+     ) {
+       elementsToRemove.add(element);
+@@ -919,6 +947,11 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -69,10 +205,23 @@ index 100b13db5..a46d723c2 100644
  
  export type ExcalidrawFrameLikeElement =
 diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
-index 6ffcc5f5e..c8b3d5019 100644
+index 6ffcc5f5e..fd4d0cc81 100644
 --- a/packages/excalidraw/actions/actionFrame.ts
 +++ b/packages/excalidraw/actions/actionFrame.ts
-@@ -178,3 +178,114 @@ export const actionWrapSelectionInFrame = register({
+@@ -129,10 +129,8 @@ export const actionWrapSelectionInFrame = register({
+   predicate: (elements, appState, _, app) => {
+     const selectedElements = getSelectedElements(elements, appState);
+ 
+-    return (
+-      selectedElements.length > 0 &&
+-      !selectedElements.some((element) => isFrameLikeElement(element))
+-    );
++    // allow wrapping any elements including frames (nested frames)
++    return selectedElements.length > 0;
+   },
+   perform: (elements, appState, _, app) => {
+     const selectedElements = getSelectedElements(elements, appState);
+@@ -178,3 +176,114 @@ export const actionWrapSelectionInFrame = register({
      };
    },
  });
@@ -201,7 +350,7 @@ index fa13b7a60..8e7098dd1 100644
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 8832af15f..6f2f083ea 100644
+index 8832af15f..cd1c0bbce 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -259,6 +259,7 @@ import {
@@ -290,7 +439,28 @@ index 8832af15f..6f2f083ea 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -13663,6 +13721,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -10838,15 +10896,11 @@ class App extends React.Component<AppProps, AppState> {
+           return;
+         }
+ 
+-        const selectedElementsHasAFrame = selectedElements.some((e) =>
+-          isFrameLikeElement(e),
+-        );
+-        const frameToHighlight = selectedElementsHasAFrame
+-          ? null
+-          : this.getTopLayerFrameAtSceneCoords(pointerCoords, {
+-              currentFrameId: getCommonFrameId(selectedElements),
+-              excludeElementIds: this.state.selectedElementIds,
+-            });
++        // Allow frames to be nested inside other frames
++        const frameToHighlight = this.getTopLayerFrameAtSceneCoords(pointerCoords, {
++          currentFrameId: getCommonFrameId(selectedElements),
++          excludeElementIds: this.state.selectedElementIds,
++        });
+         // Only update the state if there is a difference
+         this.updateFrameToHighlight(frameToHighlight);
+ 
+@@ -13663,6 +13717,8 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -325,6 +495,126 @@ index 512f0d503..3eb6ddfbf 100644
      "tab": "Tab",
      "shapeSwitch": "Switch shape",
      "preferences": "Preferences",
+diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
+index 2ecef953e..4142ba82a 100644
+--- a/packages/excalidraw/renderer/renderNewElementScene.ts
++++ b/packages/excalidraw/renderer/renderNewElementScene.ts
+@@ -5,6 +5,7 @@ import {
+   isInvisiblySmallElement,
+   renderElement,
+   shouldApplyFrameClip,
++  getAncestorFrames,
+ } from "@excalidraw/element";
+ 
+ import { bootstrapCanvas, getNormalizedCanvasDimensions } from "./helpers";
+@@ -57,13 +58,16 @@ const _renderNewElementScene = ({
+         appState.frameRendering.enabled &&
+         appState.frameRendering.clip
+       ) {
+-        const frame = getTargetFrame(newElement, elementsMap, appState);
+-
+-        if (
+-          frame &&
+-          shouldApplyFrameClip(newElement, frame, appState, elementsMap)
+-        ) {
+-          frameClip(frame, context, renderConfig, appState);
++        // Get all ancestor frames for nested frame clipping
++        const ancestorFrames = getAncestorFrames(newElement, elementsMap);
++        // Apply clips from outermost to innermost
++        for (const ancestorFrame of ancestorFrames.reverse()) {
++          if (
++            ancestorFrame.clip !== false &&
++            shouldApplyFrameClip(newElement, ancestorFrame, appState, elementsMap)
++          ) {
++            frameClip(ancestorFrame, context, renderConfig, appState);
++          }
+         }
+       }
+ 
+diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
+index 278359994..071083fca 100644
+--- a/packages/excalidraw/renderer/staticScene.ts
++++ b/packages/excalidraw/renderer/staticScene.ts
+@@ -17,6 +17,7 @@ import {
+   elementOverlapsWithFrame,
+   getTargetFrame,
+   shouldApplyFrameClip,
++  getAncestorFrames,
+ } from "@excalidraw/element";
+ 
+ import { renderElement } from "@excalidraw/element";
+@@ -327,18 +328,23 @@ const _renderStaticScene = ({
+           appState.frameRendering.enabled &&
+           appState.frameRendering.clip
+         ) {
+-          const frame = getTargetFrame(element, elementsMap, appState);
+-          if (
+-            frame &&
+-            shouldApplyFrameClip(
+-              element,
+-              frame,
+-              appState,
+-              elementsMap,
+-              inFrameGroupsMap,
+-            )
+-          ) {
+-            frameClip(frame, context, renderConfig, appState);
++          // Get all ancestor frames for nested frame clipping
++          // Apply clips from outermost to innermost so they intersect correctly
++          const ancestorFrames = getAncestorFrames(element, elementsMap);
++          // Reverse to go from outermost to innermost
++          for (const ancestorFrame of ancestorFrames.reverse()) {
++            if (
++              ancestorFrame.clip !== false &&
++              shouldApplyFrameClip(
++                element,
++                ancestorFrame,
++                appState,
++                elementsMap,
++                inFrameGroupsMap,
++              )
++            ) {
++              frameClip(ancestorFrame, context, renderConfig, appState);
++            }
+           }
+           renderElement(
+             element,
+@@ -443,19 +449,22 @@ const _renderStaticScene = ({
+         ) {
+           context.save();
+ 
+-          const frame = getTargetFrame(element, elementsMap, appState);
+-
+-          if (
+-            frame &&
+-            shouldApplyFrameClip(
+-              element,
+-              frame,
+-              appState,
+-              elementsMap,
+-              inFrameGroupsMap,
+-            )
+-          ) {
+-            frameClip(frame, context, renderConfig, appState);
++          // Get all ancestor frames for nested frame clipping
++          const ancestorFrames = getAncestorFrames(element, elementsMap);
++          // Apply clips from outermost to innermost
++          for (const ancestorFrame of ancestorFrames.reverse()) {
++            if (
++              ancestorFrame.clip !== false &&
++              shouldApplyFrameClip(
++                element,
++                ancestorFrame,
++                appState,
++                elementsMap,
++                inFrameGroupsMap,
++              )
++            ) {
++              frameClip(ancestorFrame, context, renderConfig, appState);
++            }
+           }
+           render();
+           context.restore();
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
 index 15768b78a..d35679c3e 100644
 --- a/packages/excalidraw/types.ts

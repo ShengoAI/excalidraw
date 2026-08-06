@@ -532,10 +532,18 @@ index 2ecef953e..4142ba82a 100644
        }
  
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index 278359994..071083fca 100644
+index 278359994..f1691c527 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
-@@ -17,6 +17,7 @@ import {
+@@ -10,6 +10,7 @@ import { createPlaceholderEmbeddableLabel } from "@excalidraw/element";
+ import { getBoundTextElement } from "@excalidraw/element";
+ import {
+   isEmbeddableElement,
++  isFrameLikeElement,
+   isIframeLikeElement,
+   isTextElement,
+ } from "@excalidraw/element";
+@@ -17,6 +18,7 @@ import {
    elementOverlapsWithFrame,
    getTargetFrame,
    shouldApplyFrameClip,
@@ -543,7 +551,85 @@ index 278359994..071083fca 100644
  } from "@excalidraw/element";
  
  import { renderElement } from "@excalidraw/element";
-@@ -327,18 +328,23 @@ const _renderStaticScene = ({
+@@ -156,6 +158,66 @@ export const frameClip = (
+   );
+ };
+ 
++/**
++ * Renders the background fill for frames.
++ * This is called BEFORE rendering children so that children appear on top of the background.
++ * The frame outline/stroke is rendered separately via renderElement after children.
++ */
++const renderFrameBackgrounds = (
++  context: CanvasRenderingContext2D,
++  visibleElements: readonly NonDeletedExcalidrawElement[],
++  appState: StaticCanvasAppState,
++) => {
++  if (!appState.frameRendering.enabled) {
++    return;
++  }
++
++  // Render frame backgrounds in z-order (lowest first)
++  for (const element of visibleElements) {
++    if (!isFrameLikeElement(element)) {
++      continue;
++    }
++
++    // Only render background if not transparent
++    if (element.backgroundColor === "transparent") {
++      continue;
++    }
++
++    context.save();
++    context.translate(
++      element.x + appState.scrollX,
++      element.y + appState.scrollY,
++    );
++
++    // Apply element opacity
++    context.globalAlpha = element.opacity / 100;
++
++    // Apply background color
++    context.fillStyle = applyDarkModeFilter(
++      element.backgroundColor,
++      appState.theme === THEME.DARK,
++    );
++
++    // Draw the background with rounded corners
++    if (FRAME_STYLE.radius && context.roundRect) {
++      context.beginPath();
++      context.roundRect(
++        0,
++        0,
++        element.width,
++        element.height,
++        FRAME_STYLE.radius / appState.zoom.value,
++      );
++      context.fill();
++      context.closePath();
++    } else {
++      context.fillRect(0, 0, element.width, element.height);
++    }
++
++    context.restore();
++  }
++};
++
+ type LinkIconCanvas = HTMLCanvasElement & { zoom: number };
+ 
+ const linkIconCanvasCache: {
+@@ -304,6 +366,10 @@ const _renderStaticScene = ({
+ 
+   const inFrameGroupsMap = new Map<string, boolean>();
+ 
++  // Render frame backgrounds FIRST, before any children
++  // This ensures children appear on top of the frame background
++  renderFrameBackgrounds(context, visibleElements, appState);
++
+   // Paint visible elements
+   visibleElements
+     .filter((el) => !isIframeLikeElement(el))
+@@ -327,18 +393,23 @@ const _renderStaticScene = ({
            appState.frameRendering.enabled &&
            appState.frameRendering.clip
          ) {
@@ -579,7 +665,7 @@ index 278359994..071083fca 100644
            }
            renderElement(
              element,
-@@ -443,19 +449,22 @@ const _renderStaticScene = ({
+@@ -443,19 +514,22 @@ const _renderStaticScene = ({
          ) {
            context.save();
  
@@ -647,3 +733,46 @@ index 15768b78a..d35679c3e 100644
    toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
    getEditorInterface: () => EditorInterface;
    /**
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+index 22c3ed494..a11d7e3ee 100644
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -737,26 +737,31 @@ export const renderElement = (
+   switch (element.type) {
+     case "magicframe":
+     case "frame": {
++      // NOTE: Frame backgrounds are rendered in a separate pass BEFORE children
++      // (see renderFrameBackgrounds in staticScene.ts)
++      // This case only handles the frame outline/stroke which renders AFTER children
+       if (appState.frameRendering.enabled && appState.frameRendering.outline) {
+         context.save();
+         context.translate(
+           element.x + appState.scrollX,
+           element.y + appState.scrollY,
+         );
+-        context.fillStyle = "rgba(0, 0, 200, 0.04)";
+-
+-        context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
+-        context.strokeStyle = applyDarkModeFilter(
+-          FRAME_STYLE.strokeColor,
+-          appState.theme === THEME.DARK,
+-        );
+ 
+         // TODO change later to only affect AI frames
+         if (isMagicFrameElement(element)) {
++          // Use special color for magic frames
+           context.strokeStyle =
+             appState.theme === THEME.LIGHT
+               ? "#7affd7"
+               : applyDarkModeFilter("#1d8264");
++          context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
++        } else {
++          // Use element's own stroke properties
++          context.strokeStyle = applyDarkModeFilter(
++            element.strokeColor,
++            appState.theme === THEME.DARK,
++          );
++          context.lineWidth = element.strokeWidth / appState.zoom.value;
+         }
+ 
+         if (FRAME_STYLE.radius && context.roundRect) {

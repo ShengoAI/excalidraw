@@ -1,0 +1,436 @@
+diff --git a/packages/element/src/collision.ts b/packages/element/src/collision.ts
+index bbc5698f2..55bbf967c 100644
+--- a/packages/element/src/collision.ts
++++ b/packages/element/src/collision.ts
+@@ -250,6 +250,7 @@ export const hitElementBoundText = (
+   point: GlobalPoint,
+   element: ExcalidrawElement,
+   elementsMap: ElementsMap,
++  threshold = 0,
+ ): boolean => {
+   const boundTextElementCandidate = getBoundTextElement(element, elementsMap);
+ 
+@@ -269,7 +270,7 @@ export const hitElementBoundText = (
+       }
+     : boundTextElementCandidate;
+ 
+-  return isPointInElement(point, boundTextElement, elementsMap);
++  return hitElementBoundingBox(point, boundTextElement, elementsMap, threshold);
+ };
+ 
+ const bindingBorderTest = (
+diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
+index 38afdceab..287fdf2df 100644
+--- a/packages/element/src/dragElements.ts
++++ b/packages/element/src/dragElements.ts
+@@ -5,6 +5,7 @@ import {
+   getFontString,
+   DRAGGING_THRESHOLD,
+ } from "@excalidraw/common";
++import { pointFrom, type GlobalPoint } from "@excalidraw/math";
+ 
+ import type {
+   AppState,
+@@ -17,6 +18,7 @@ import type { NonDeletedExcalidrawElement } from "@excalidraw/element/types";
+ 
+ import { unbindBindingElement, updateBoundElements } from "./binding";
+ import { getCommonBounds } from "./bounds";
++import { LinearElementEditor } from "./linearElementEditor";
+ import { getPerfectElementSize } from "./sizeHelpers";
+ import { getBoundTextElement } from "./textElement";
+ import { getMinTextElementWidth } from "./textMeasurements";
+@@ -43,6 +45,35 @@ export const dragSelectedElements = (
+   },
+   gridSize: NullableGridSize,
+ ) => {
++  if (
++    pointerDownState.drag.arrowTextElementId &&
++    _selectedElements.length === 1 &&
++    isArrowElement(_selectedElements[0]) &&
++    _selectedElements[0].id === pointerDownState.drag.arrowTextElementId
++  ) {
++    const originalArrowElement = pointerDownState.originalElements.get(
++      _selectedElements[0].id,
++    );
++
++    if (!originalArrowElement || !isArrowElement(originalArrowElement)) {
++      return;
++    }
++
++    const pointerPosition = pointFrom<GlobalPoint>(
++      pointerDownState.origin.x + offset.x,
++      pointerDownState.origin.y + offset.y,
++    );
++    const labelPosition = LinearElementEditor.getBoundTextNormalizedPositionOnArrow(
++      _selectedElements[0],
++      pointerPosition,
++      scene.getNonDeletedElementsMap(),
++    );
++    scene.mutateElement(_selectedElements[0], {
++      labelPosition,
++    });
++    return;
++  }
++
+   if (
+     _selectedElements.length === 1 &&
+     isElbowArrow(_selectedElements[0]) &&
+diff --git a/packages/element/src/linearElementEditor.ts b/packages/element/src/linearElementEditor.ts
+index 243f1f7b4..a4c87e2b1 100644
+--- a/packages/element/src/linearElementEditor.ts
++++ b/packages/element/src/linearElementEditor.ts
+@@ -86,6 +86,107 @@ import type {
+   ExcalidrawBindableElement,
+ } from "./types";
+ 
++const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
++
++const getPointAtNormalizedPosition = (
++  points: readonly GlobalPoint[],
++  normalizedPosition: number,
++): GlobalPoint => {
++  const clampedPosition = clamp01(normalizedPosition);
++
++  if (points.length < 2) {
++    return points[0] ?? pointFrom<GlobalPoint>(0, 0);
++  }
++
++  let totalLength = 0;
++  for (let i = 0; i < points.length - 1; i++) {
++    totalLength += pointDistance(points[i], points[i + 1]);
++  }
++
++  if (totalLength === 0) {
++    return points[0];
++  }
++
++  const targetLength = totalLength * clampedPosition;
++  let traversedLength = 0;
++
++  for (let i = 0; i < points.length - 1; i++) {
++    const start = points[i];
++    const end = points[i + 1];
++    const segmentLength = pointDistance(start, end);
++
++    if (segmentLength === 0) {
++      continue;
++    }
++
++    if (traversedLength + segmentLength >= targetLength) {
++      const segmentPosition = (targetLength - traversedLength) / segmentLength;
++      return pointFrom<GlobalPoint>(
++        start[0] + (end[0] - start[0]) * segmentPosition,
++        start[1] + (end[1] - start[1]) * segmentPosition,
++      );
++    }
++
++    traversedLength += segmentLength;
++  }
++
++  return points[points.length - 1];
++};
++
++const getClosestNormalizedPositionOnPolyline = (
++  points: readonly GlobalPoint[],
++  targetPoint: GlobalPoint,
++): number => {
++  if (points.length < 2) {
++    return 0.5;
++  }
++
++  let totalLength = 0;
++  for (let i = 0; i < points.length - 1; i++) {
++    totalLength += pointDistance(points[i], points[i + 1]);
++  }
++
++  if (totalLength === 0) {
++    return 0.5;
++  }
++
++  let traversedLength = 0;
++  let bestDistanceSquared = Number.POSITIVE_INFINITY;
++  let bestLength = totalLength * 0.5;
++
++  for (let i = 0; i < points.length - 1; i++) {
++    const start = points[i];
++    const end = points[i + 1];
++    const dx = end[0] - start[0];
++    const dy = end[1] - start[1];
++    const segmentLength = pointDistance(start, end);
++
++    if (segmentLength === 0) {
++      continue;
++    }
++
++    const lengthSquared = dx * dx + dy * dy;
++    const projection = clamp01(
++      ((targetPoint[0] - start[0]) * dx + (targetPoint[1] - start[1]) * dy) /
++        lengthSquared,
++    );
++
++    const projectedX = start[0] + dx * projection;
++    const projectedY = start[1] + dy * projection;
++    const distanceSquared =
++      (targetPoint[0] - projectedX) ** 2 + (targetPoint[1] - projectedY) ** 2;
++
++    if (distanceSquared < bestDistanceSquared) {
++      bestDistanceSquared = distanceSquared;
++      bestLength = traversedLength + segmentLength * projection;
++    }
++
++    traversedLength += segmentLength;
++  }
++
++  return clamp01(bestLength / totalLength);
++};
++
+ /**
+  * Normalizes line points so that the start point is at [0,0]. This is
+  * expected in various parts of the codebase.
+@@ -1871,29 +1972,44 @@ export class LinearElementEditor {
+     if (points.length < 2) {
+       mutateElement(boundTextElement, elementsMap, { isDeleted: true });
+     }
+-    let x = 0;
+-    let y = 0;
+-    if (element.points.length % 2 === 1) {
++    let labelAnchorPoint: GlobalPoint;
++    if (isArrowElement(element) && element.labelPosition != null) {
++      labelAnchorPoint = getPointAtNormalizedPosition(
++        points,
++        element.labelPosition,
++      );
++    } else if (element.points.length % 2 === 1) {
+       const index = Math.floor(element.points.length / 2);
+-      const midPoint = LinearElementEditor.getPointGlobalCoordinates(
++      labelAnchorPoint = LinearElementEditor.getPointGlobalCoordinates(
+         element,
+         element.points[index],
+         elementsMap,
+       );
+-      x = midPoint[0] - boundTextElement.width / 2;
+-      y = midPoint[1] - boundTextElement.height / 2;
+     } else {
+       const index = element.points.length / 2 - 1;
+-      const midSegmentMidpoint = LinearElementEditor.getSegmentMidPoint(
++      labelAnchorPoint = LinearElementEditor.getSegmentMidPoint(
+         element,
+         index + 1,
+         elementsMap,
+       );
+-
+-      x = midSegmentMidpoint[0] - boundTextElement.width / 2;
+-      y = midSegmentMidpoint[1] - boundTextElement.height / 2;
+     }
+-    return { x, y };
++
++    return {
++      x: labelAnchorPoint[0] - boundTextElement.width / 2,
++      y: labelAnchorPoint[1] - boundTextElement.height / 2,
++    };
++  };
++
++  static getBoundTextNormalizedPositionOnArrow = (
++    element: ExcalidrawLinearElement,
++    targetPoint: GlobalPoint,
++    elementsMap: ElementsMap,
++  ): number => {
++    const points = LinearElementEditor.getPointsGlobalCoordinates(
++      element,
++      elementsMap,
++    );
++    return getClosestNormalizedPositionOnPolyline(points, targetPoint);
+   };
+ 
+   static getMinMaxXYWithBoundText = (
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+index db509ba77..d1c2139db 100644
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -514,6 +514,7 @@ export const newArrowElement = <T extends boolean>(
+       startArrowhead: opts.startArrowhead || null,
+       endArrowhead: opts.endArrowhead || null,
+       elbowed: true,
++      labelPosition: null,
+       fixedSegments: opts.fixedSegments || [],
+       startIsSpecial: false,
+       endIsSpecial: false,
+@@ -528,6 +529,7 @@ export const newArrowElement = <T extends boolean>(
+     startArrowhead: opts.startArrowhead || null,
+     endArrowhead: opts.endArrowhead || null,
+     elbowed: false,
++    labelPosition: null,
+   } as T extends true
+     ? NonDeleted<ExcalidrawElbowArrowElement>
+     : NonDeleted<ExcalidrawArrowElement>;
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+index 100b13db5..90ecdafe8 100644
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -356,6 +356,12 @@ export type ExcalidrawArrowElement = ExcalidrawLinearElement &
+   Readonly<{
+     type: "arrow";
+     elbowed: boolean;
++    /**
++     * User-adjusted label anchor position constrained to the arrow path.
++     * Stored as normalized length on the arrow polyline in [0, 1], where
++     * 0 is start, 1 is end. `null` means default midpoint.
++     */
++    labelPosition?: number | null;
+   }>;
+ 
+ export type ExcalidrawElbowArrowElement = Merge<
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 0e573219f..d45e050fc 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -405,6 +405,7 @@ import {
+   getReferenceSnapPoints,
+   SnapCache,
+   isGridModeEnabled,
++  type SnapLine,
+ } from "../snapping";
+ import { Renderer } from "../scene/Renderer";
+ import {
+@@ -8127,6 +8128,19 @@ class App extends React.Component<AppProps, AppState> {
+       return;
+     }
+     if (this.state.selectedLinearElement) {
++      if (
++        isArrowElement(element) &&
++        !this.state.editingTextElement &&
++        hitElementBoundText(
++          pointFrom(scenePointerX, scenePointerY),
++          element,
++          elementsMap,
++          this.getElementHitThreshold(element),
++        )
++      ) {
++        this.cursor.set(CURSOR_TYPE.GRAB);
++      }
++
+       let hoverPointIndex = -1;
+       let segmentMidPointHoveredCoords = null;
+       if (
+@@ -9046,6 +9060,19 @@ class App extends React.Component<AppProps, AppState> {
+   ): PointerDownState {
+     const origin = viewportCoordsToSceneCoords(event, this.state);
+     const selectedElements = this.scene.getSelectedElements(this.state);
++    const arrowWithDraggedLabel =
++      selectedElements.length === 1 && isArrowElement(selectedElements[0])
++        ? selectedElements[0]
++        : null;
++    const isDraggingArrowLabel = Boolean(
++      arrowWithDraggedLabel &&
++        hitElementBoundText(
++          pointFrom(origin.x, origin.y),
++          arrowWithDraggedLabel,
++          this.scene.getNonDeletedElementsMap(),
++          this.getElementHitThreshold(arrowWithDraggedLabel),
++        ),
++    );
+     const [minX, minY, maxX, maxY] = getCommonBounds(selectedElements);
+     const isElbowArrowOnly = selectedElements.findIndex(isElbowArrow) === 0;
+ 
+@@ -9095,6 +9122,9 @@ class App extends React.Component<AppProps, AppState> {
+       drag: {
+         hasOccurred: false,
+         offset: null,
++        arrowTextElementId: isDraggingArrowLabel
++          ? arrowWithDraggedLabel!.id
++          : null,
+         origin: { ...origin },
+         blockDragging: false,
+       },
+@@ -10855,20 +10885,31 @@ class App extends React.Component<AppProps, AppState> {
+             }
+           }
+ 
+-          // Snap cache *must* be synchronously popuplated before initial drag,
+-          // otherwise the first drag even will not snap, causing a jump before
+-          // it snaps to its position if previously snapped already.
+-          this.maybeCacheVisibleGaps(event, selectedElements);
+-          this.maybeCacheReferenceSnapPoints(event, selectedElements);
+-
+-          const { snapOffset, snapLines } = snapDraggedElements(
+-            originalElements,
+-            dragOffset,
+-            this,
+-            event,
+-            this.scene.getNonDeletedElementsMap(),
++          const isDraggingArrowLabel = Boolean(
++            pointerDownState.drag.arrowTextElementId,
+           );
+ 
++          let snapOffset = { x: 0, y: 0 };
++          let snapLines: readonly SnapLine[] = [];
++
++          if (!isDraggingArrowLabel) {
++            // Snap cache *must* be synchronously popuplated before initial drag,
++            // otherwise the first drag even will not snap, causing a jump before
++            // it snaps to its position if previously snapped already.
++            this.maybeCacheVisibleGaps(event, selectedElements);
++            this.maybeCacheReferenceSnapPoints(event, selectedElements);
++
++            const draggedSnap = snapDraggedElements(
++              originalElements,
++              dragOffset,
++              this,
++              event,
++              this.scene.getNonDeletedElementsMap(),
++            );
++            snapOffset = draggedSnap.snapOffset;
++            snapLines = draggedSnap.snapLines;
++          }
++
+           this.setState({ snapLines });
+ 
+           // when we're editing the name of a frame, we want the user to be
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+index a6987e9df..cee1002c2 100644
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -627,6 +627,21 @@ export const restoreElement = (
+           : normalizeArrowhead(element.endArrowhead);
+       const x = element.x as number | undefined;
+       const y = element.y as number | undefined;
++      const labelPositionCandidate = (element as ExcalidrawArrowElement)
++        .labelPosition;
++      const labelPosition =
++        isFiniteNumber(labelPositionCandidate) &&
++        labelPositionCandidate >= 0 &&
++        labelPositionCandidate <= 1
++          ? labelPositionCandidate
++          : null;
++      // Backward compatibility for earlier patch revisions.
++      const labelOffsetCandidate = (
++        element as ExcalidrawArrowElement & { labelOffset?: LocalPoint | null }
++      ).labelOffset;
++      const legacyLabelPosition = isValidPoint(labelOffsetCandidate)
++        ? 0.5
++        : null;
+       const points = restoreLinearElementPoints(
+         element.points,
+         element.width,
+@@ -661,6 +676,7 @@ export const restoreElement = (
+         x: x ?? 0,
+         y: y ?? 0,
+         elbowed: (element as ExcalidrawArrowElement).elbowed,
++        labelPosition: labelPosition ?? legacyLabelPosition,
+         ...getSizeFromPoints(points),
+       };
+ 
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index 3162e5903..4a3a9d656 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -1146,6 +1146,9 @@ export type PointerDownState = Readonly<{
+     hasOccurred: boolean;
+     // Might change during the pointer interaction
+     offset: { x: number; y: number } | null;
++    // If set, dragging updates the selected arrow label offset instead
++    // of moving the whole element.
++    arrowTextElementId?: ExcalidrawElement["id"] | null;
+     // by default same as PointerDownState.origin. On alt-duplication, reset
+     // to current pointer position at time of duplication.
+     origin: { x: number; y: number };

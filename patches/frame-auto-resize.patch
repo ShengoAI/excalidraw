@@ -39,7 +39,7 @@ index 287fdf2..10131a7 100644
      }
    }
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf2..565a77a 100644
+index bc2cdf2..8b03325 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -46,6 +46,9 @@ import type {
@@ -229,7 +229,31 @@ index bc2cdf2..565a77a 100644
        continue;
      }
  
-@@ -566,11 +706,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -521,7 +661,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+ export const getFrameChildrenInsertionIndex = (
+   elements: readonly ExcalidrawElement[],
+   frameId: ExcalidrawFrameLikeElement["id"],
++  opts: { insertAboveFrame?: boolean } = {},
+ ): number | null => {
++  if (opts.insertAboveFrame) {
++    for (let index = elements.length - 1; index >= 0; index--) {
++      const element = elements[index];
++
++      if (
++        element.id === frameId ||
++        (element.frameId === frameId && isFrameLikeElement(element))
++      ) {
++        return index + 1;
++      }
++    }
++
++    return null;
++  }
++
+   for (let index = elements.length - 1; index >= 0; index--) {
+     const element = elements[index];
+ 
+@@ -566,11 +722,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -248,7 +272,21 @@ index bc2cdf2..565a77a 100644
        continue;
      }
  
-@@ -725,9 +867,9 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -610,9 +768,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+   const otherElements = Array.from(allElements.values()).filter(
+     (element) => !finalElementsToAdd.has(element),
+   );
++  const hasNestedFrames = [...finalElementsToAdd].some((element) =>
++    isFrameLikeElement(element),
++  );
+   const insertionIndex = getFrameChildrenInsertionIndex(
+     otherElements,
+     frame.id,
++    { insertAboveFrame: hasNestedFrames },
+   );
+ 
+   if (insertionIndex === null) {
+@@ -725,9 +887,9 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -259,7 +297,7 @@ index bc2cdf2..565a77a 100644
        !isElementInFrame(element, elementsMap, appState)
      ) {
        elementsToRemove.add(element);
-@@ -919,6 +1061,11 @@ export const shouldApplyFrameClip = (
+@@ -919,6 +1081,11 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -958,7 +996,7 @@ index 2ecef95..4142ba8 100644
        }
  
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index 2783599..f1691c5 100644
+index 2783599..da65e7f 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
 @@ -10,6 +10,7 @@ import { createPlaceholderEmbeddableLabel } from "@excalidraw/element";
@@ -977,7 +1015,15 @@ index 2783599..f1691c5 100644
  } from "@excalidraw/element";
  
  import { renderElement } from "@excalidraw/element";
-@@ -156,6 +158,66 @@ export const frameClip = (
+@@ -26,6 +28,7 @@ import { getElementAbsoluteCoords } from "@excalidraw/element";
+ import type {
+   ElementsMap,
+   ExcalidrawFrameLikeElement,
++  NonDeleted,
+   NonDeletedExcalidrawElement,
+ } from "@excalidraw/element/types";
+ 
+@@ -156,6 +159,74 @@ export const frameClip = (
    );
  };
  
@@ -989,23 +1035,31 @@ index 2783599..f1691c5 100644
 +const renderFrameBackgrounds = (
 +  context: CanvasRenderingContext2D,
 +  visibleElements: readonly NonDeletedExcalidrawElement[],
++  elementsMap: ElementsMap,
 +  appState: StaticCanvasAppState,
 +) => {
 +  if (!appState.frameRendering.enabled) {
 +    return;
 +  }
 +
-+  // Render frame backgrounds in z-order (lowest first)
-+  for (const element of visibleElements) {
-+    if (!isFrameLikeElement(element)) {
-+      continue;
-+    }
++  const elementOrder = new Map(
++    visibleElements.map((element, index) => [element.id, index]),
++  );
++  const frameBackgrounds = visibleElements
++    .filter(
++      (element): element is NonDeleted<ExcalidrawFrameLikeElement> =>
++        isFrameLikeElement(element) &&
++        element.backgroundColor !== "transparent",
++    )
++    .sort((a, b) => {
++      const depthA = getAncestorFrames(a, elementsMap).length;
++      const depthB = getAncestorFrames(b, elementsMap).length;
 +
-+    // Only render background if not transparent
-+    if (element.backgroundColor === "transparent") {
-+      continue;
-+    }
++      return depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!;
++    });
 +
++  // Render parent frame backgrounds before nested frame backgrounds.
++  for (const element of frameBackgrounds) {
 +    context.save();
 +    context.translate(
 +      element.x + appState.scrollX,
@@ -1044,18 +1098,18 @@ index 2783599..f1691c5 100644
  type LinkIconCanvas = HTMLCanvasElement & { zoom: number };
  
  const linkIconCanvasCache: {
-@@ -304,6 +366,10 @@ const _renderStaticScene = ({
+@@ -304,6 +375,10 @@ const _renderStaticScene = ({
  
    const inFrameGroupsMap = new Map<string, boolean>();
  
 +  // Render frame backgrounds FIRST, before any children
 +  // This ensures children appear on top of the frame background
-+  renderFrameBackgrounds(context, visibleElements, appState);
++  renderFrameBackgrounds(context, visibleElements, elementsMap, appState);
 +
    // Paint visible elements
    visibleElements
      .filter((el) => !isIframeLikeElement(el))
-@@ -327,18 +393,23 @@ const _renderStaticScene = ({
+@@ -327,18 +402,23 @@ const _renderStaticScene = ({
            appState.frameRendering.enabled &&
            appState.frameRendering.clip
          ) {
@@ -1091,7 +1145,7 @@ index 2783599..f1691c5 100644
            }
            renderElement(
              element,
-@@ -443,19 +514,22 @@ const _renderStaticScene = ({
+@@ -443,19 +523,22 @@ const _renderStaticScene = ({
          ) {
            context.save();
  

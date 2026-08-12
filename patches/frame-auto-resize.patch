@@ -1,8 +1,8 @@
 diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
-index 38afdceab..4802bf9cb 100644
+index 287fdf2..10131a7 100644
 --- a/packages/element/src/dragElements.ts
 +++ b/packages/element/src/dragElements.ts
-@@ -72,14 +72,27 @@ export const dragSelectedElements = (
+@@ -103,14 +103,27 @@ export const dragSelectedElements = (
    const elementsToUpdate = new Set<NonDeletedExcalidrawElement>(
      selectedElements,
    );
@@ -39,10 +39,20 @@ index 38afdceab..4802bf9cb 100644
      }
    }
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf285..b25bcf103 100644
+index bc2cdf2..2e4e32d 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -95,11 +95,11 @@ export const getElementsCompletelyInFrame = (
+@@ -46,6 +46,9 @@ import type {
+   NonDeletedExcalidrawElement,
+ } from "./types";
+ 
++export const DEFAULT_FRAME_AUTO_LAYOUT_PADDING = 16;
++const FRAME_AUTO_LAYOUT_GAP = 16;
++
+ // --------------------------- Frame State ------------------------------------
+ export const bindElementsToFramesAfterDuplication = (
+   nextElements: readonly ExcalidrawElement[],
+@@ -95,11 +98,11 @@ export const getElementsCompletelyInFrame = (
    frame: ExcalidrawFrameLikeElement,
    elementsMap: ElementsMap,
  ) =>
@@ -58,7 +68,7 @@ index bc2cdf285..b25bcf103 100644
        element.frameId === frame.id,
    );
  
-@@ -444,6 +444,30 @@ export const getContainingFrame = (
+@@ -444,6 +447,138 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -86,10 +96,118 @@ index bc2cdf285..b25bcf103 100644
 +  return ancestors;
 +};
 +
++export const layoutFrameChildren = (
++  frame: ExcalidrawFrameLikeElement,
++  allElements: ElementsMapOrArray,
++  direction = frame.autoLayout,
++  opts: {
++    width?: number;
++    height?: number;
++    padding?: Partial<{ horizontal: number; vertical: number }>;
++  } = {},
++): boolean => {
++  if (!direction) {
++    return false;
++  }
++
++  const padding = {
++    horizontal:
++      opts.padding?.horizontal ??
++      frame.autoLayoutPadding?.horizontal ??
++      DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++    vertical:
++      opts.padding?.vertical ??
++      frame.autoLayoutPadding?.vertical ??
++      DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++  };
++
++  const elementsMap = arrayToMap(allElements);
++  const elements = Array.isArray(allElements)
++    ? allElements
++    : Array.from(allElements.values());
++  const children = getFrameChildren(getNonDeletedElements(elements), frame.id)
++    .filter((element) => !(isTextElement(element) && element.containerId))
++    .sort((a, b) => {
++      if (direction === "vertical") {
++        return a.y === b.y ? a.x - b.x : a.y - b.y;
++      }
++      return a.x === b.x ? a.y - b.y : a.x - b.x;
++    });
++
++  if (!children.length) {
++    return false;
++  }
++
++  let cursorX = frame.x + padding.horizontal;
++  let cursorY = frame.y + padding.vertical;
++  let contentWidth = 0;
++  let contentHeight = 0;
++
++  for (const child of children) {
++    const [x1, y1, x2, y2] = getElementAbsoluteCoords(child, elementsMap);
++    const deltaX = cursorX - x1;
++    const deltaY = cursorY - y1;
++
++    mutateElement(child, elementsMap, {
++      x: child.x + deltaX,
++      y: child.y + deltaY,
++    });
++
++    const boundTextElement = getBoundTextElement(child, elementsMap);
++    if (boundTextElement) {
++      mutateElement(boundTextElement, elementsMap, {
++        x: boundTextElement.x + deltaX,
++        y: boundTextElement.y + deltaY,
++      });
++    }
++
++    const childWidth = x2 - x1;
++    const childHeight = y2 - y1;
++
++    if (direction === "vertical") {
++      cursorY += childHeight + FRAME_AUTO_LAYOUT_GAP;
++      contentHeight +=
++        childHeight + (contentHeight ? FRAME_AUTO_LAYOUT_GAP : 0);
++      contentWidth = Math.max(contentWidth, childWidth);
++    } else {
++      cursorX += childWidth + FRAME_AUTO_LAYOUT_GAP;
++      contentWidth += childWidth + (contentWidth ? FRAME_AUTO_LAYOUT_GAP : 0);
++      contentHeight = Math.max(contentHeight, childHeight);
++    }
++  }
++
++  const contentFrameWidth = contentWidth + padding.horizontal * 2;
++  const contentFrameHeight = contentHeight + padding.vertical * 2;
++
++  mutateElement(frame, elementsMap, {
++    width: Math.max(opts.width ?? frame.width, contentFrameWidth),
++    height: Math.max(opts.height ?? frame.height, contentFrameHeight),
++    autoLayoutPadding: padding,
++  });
++
++  return true;
++};
++
++export const layoutAutoLayoutFrames = (allElements: ElementsMapOrArray) => {
++  let didLayout = false;
++
++  const elements = Array.isArray(allElements)
++    ? allElements
++    : Array.from(allElements.values());
++
++  for (const element of getNonDeletedElements(elements)) {
++    if (isFrameLikeElement(element) && element.autoLayout) {
++      didLayout = layoutFrameChildren(element, allElements) || didLayout;
++    }
++  }
++
++  return didLayout;
++};
++
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +490,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +601,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -108,7 +226,7 @@ index bc2cdf285..b25bcf103 100644
        continue;
      }
  
-@@ -566,11 +592,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +703,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -127,7 +245,7 @@ index bc2cdf285..b25bcf103 100644
        continue;
      }
  
-@@ -725,9 +753,9 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,9 +864,9 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -138,7 +256,7 @@ index bc2cdf285..b25bcf103 100644
        !isElementInFrame(element, elementsMap, appState)
      ) {
        elementsToRemove.add(element);
-@@ -919,6 +947,11 @@ export const shouldApplyFrameClip = (
+@@ -919,6 +1058,11 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -151,64 +269,139 @@ index bc2cdf285..b25bcf103 100644
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index db509ba77..e762162db 100644
+index d1c2139..1ad7393 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
-@@ -187,6 +187,7 @@ export const newIframeElement = (
+@@ -187,6 +187,9 @@ export const newIframeElement = (
  export const newFrameElement = (
    opts: {
      name?: string;
 +    clip?: boolean;
++    autoLayout?: "vertical" | "horizontal" | null;
++    autoLayoutPadding?: { horizontal: number; vertical: number };
    } & ElementConstructorOpts,
  ): NonDeleted<ExcalidrawFrameElement> => {
    const frameElement = newElementWith(
-@@ -194,6 +195,7 @@ export const newFrameElement = (
+@@ -194,6 +197,12 @@ export const newFrameElement = (
        ..._newElementBase<ExcalidrawFrameElement>("frame", opts),
        type: "frame",
        name: opts?.name || null,
 +      clip: opts?.clip ?? true,
++      autoLayout: opts?.autoLayout ?? null,
++      autoLayoutPadding: opts?.autoLayoutPadding ?? {
++        horizontal: 16,
++        vertical: 16,
++      },
      },
      {},
    );
-@@ -204,6 +206,7 @@ export const newFrameElement = (
+@@ -204,6 +213,9 @@ export const newFrameElement = (
  export const newMagicFrameElement = (
    opts: {
      name?: string;
 +    clip?: boolean;
++    autoLayout?: "vertical" | "horizontal" | null;
++    autoLayoutPadding?: { horizontal: number; vertical: number };
    } & ElementConstructorOpts,
  ): NonDeleted<ExcalidrawMagicFrameElement> => {
    const frameElement = newElementWith(
-@@ -211,6 +214,7 @@ export const newMagicFrameElement = (
+@@ -211,6 +223,12 @@ export const newMagicFrameElement = (
        ..._newElementBase<ExcalidrawMagicFrameElement>("magicframe", opts),
        type: "magicframe",
        name: opts?.name || null,
 +      clip: opts?.clip ?? true,
++      autoLayout: opts?.autoLayout ?? null,
++      autoLayoutPadding: opts?.autoLayoutPadding ?? {
++        horizontal: 16,
++        vertical: 16,
++      },
      },
      {},
    );
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+index 22c3ed4..a11d7e3 100644
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -737,26 +737,31 @@ export const renderElement = (
+   switch (element.type) {
+     case "magicframe":
+     case "frame": {
++      // NOTE: Frame backgrounds are rendered in a separate pass BEFORE children
++      // (see renderFrameBackgrounds in staticScene.ts)
++      // This case only handles the frame outline/stroke which renders AFTER children
+       if (appState.frameRendering.enabled && appState.frameRendering.outline) {
+         context.save();
+         context.translate(
+           element.x + appState.scrollX,
+           element.y + appState.scrollY,
+         );
+-        context.fillStyle = "rgba(0, 0, 200, 0.04)";
+-
+-        context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
+-        context.strokeStyle = applyDarkModeFilter(
+-          FRAME_STYLE.strokeColor,
+-          appState.theme === THEME.DARK,
+-        );
+ 
+         // TODO change later to only affect AI frames
+         if (isMagicFrameElement(element)) {
++          // Use special color for magic frames
+           context.strokeStyle =
+             appState.theme === THEME.LIGHT
+               ? "#7affd7"
+               : applyDarkModeFilter("#1d8264");
++          context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
++        } else {
++          // Use element's own stroke properties
++          context.strokeStyle = applyDarkModeFilter(
++            element.strokeColor,
++            appState.theme === THEME.DARK,
++          );
++          context.lineWidth = element.strokeWidth / appState.zoom.value;
+         }
+ 
+         if (FRAME_STYLE.radius && context.roundRect) {
 diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
-index 100b13db5..a46d723c2 100644
+index 90ecdaf..5d07e7e 100644
 --- a/packages/element/src/types.ts
 +++ b/packages/element/src/types.ts
-@@ -163,11 +163,13 @@ export type InitializedExcalidrawImageElement = MarkNonNullable<
+@@ -163,11 +163,23 @@ export type InitializedExcalidrawImageElement = MarkNonNullable<
  export type ExcalidrawFrameElement = _ExcalidrawElementBase & {
    type: "frame";
    name: string | null;
 +  clip: boolean;
++  autoLayout: "vertical" | "horizontal" | null;
++  autoLayoutPadding: {
++    horizontal: number;
++    vertical: number;
++  };
  };
  
  export type ExcalidrawMagicFrameElement = _ExcalidrawElementBase & {
    type: "magicframe";
    name: string | null;
 +  clip: boolean;
++  autoLayout: "vertical" | "horizontal" | null;
++  autoLayoutPadding: {
++    horizontal: number;
++    vertical: number;
++  };
  };
  
  export type ExcalidrawFrameLikeElement =
 diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
-index 6ffcc5f5e..fd4d0cc81 100644
+index 6ffcc5f..584240f 100644
 --- a/packages/excalidraw/actions/actionFrame.ts
 +++ b/packages/excalidraw/actions/actionFrame.ts
-@@ -129,10 +129,8 @@ export const actionWrapSelectionInFrame = register({
+@@ -4,6 +4,7 @@ import { newFrameElement } from "@excalidraw/element";
+ import { isFrameLikeElement } from "@excalidraw/element";
+ import {
+   addElementsToFrame,
++  layoutFrameChildren,
+   removeAllElementsFromFrame,
+ } from "@excalidraw/element";
+ import { getFrameChildren } from "@excalidraw/element";
+@@ -129,10 +130,8 @@ export const actionWrapSelectionInFrame = register({
    predicate: (elements, appState, _, app) => {
      const selectedElements = getSelectedElements(elements, appState);
  
@@ -221,7 +414,7 @@ index 6ffcc5f5e..fd4d0cc81 100644
    },
    perform: (elements, appState, _, app) => {
      const selectedElements = getSelectedElements(elements, appState);
-@@ -178,3 +176,114 @@ export const actionWrapSelectionInFrame = register({
+@@ -178,3 +177,179 @@ export const actionWrapSelectionInFrame = register({
      };
    },
  });
@@ -294,6 +487,71 @@ index 6ffcc5f5e..fd4d0cc81 100644
 +  },
 +});
 +
++const createAutoLayoutFrameAction = (
++  direction: "vertical" | "horizontal",
++) =>
++  register({
++    name:
++      direction === "vertical"
++        ? "autoLayoutFrameVertical"
++        : "autoLayoutFrameHorizontal",
++    label:
++      direction === "vertical"
++        ? "labels.autoLayoutFrameVertical"
++        : "labels.autoLayoutFrameHorizontal",
++    trackEvent: { category: "element" },
++    predicate: (elements, appState, _, app) => {
++      if (!isSingleFrameSelected(appState, app)) {
++        return false;
++      }
++      const selectedElement =
++        app.scene.getSelectedElements(appState).at(0) || null;
++      if (!isFrameLikeElement(selectedElement)) {
++        return false;
++      }
++      const childElements = getFrameChildren(
++        getNonDeletedElements(elements),
++        selectedElement.id,
++      );
++      return childElements.length > 0;
++    },
++    perform: (elements, appState, _, app) => {
++      const selectedElement =
++        app.scene.getSelectedElements(appState).at(0) || null;
++
++      if (!isFrameLikeElement(selectedElement)) {
++        return {
++          elements,
++          appState,
++          captureUpdate: CaptureUpdateAction.EVENTUALLY,
++        };
++      }
++
++      const elementsMap = app.scene.getNonDeletedElementsMap();
++      mutateElement(selectedElement, elementsMap, {
++        autoLayout: direction,
++      });
++      layoutFrameChildren(selectedElement, elements, direction);
++
++      return {
++        elements,
++        appState: {
++          ...appState,
++          selectedElementIds: {
++            [selectedElement.id]: true,
++          },
++        },
++        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
++      };
++    },
++  });
++
++export const actionAutoLayoutFrameVertical =
++  createAutoLayoutFrameAction("vertical");
++
++export const actionAutoLayoutFrameHorizontal =
++  createAutoLayoutFrameAction("horizontal");
++
 +export const actionToggleFrameClip = register({
 +  name: "toggleFrameClip",
 +  label: (elements, appState, app) => {
@@ -337,49 +595,59 @@ index 6ffcc5f5e..fd4d0cc81 100644
 +  },
 +});
 diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
-index fa13b7a60..8e7098dd1 100644
+index fa13b7a..a9711f8 100644
 --- a/packages/excalidraw/actions/types.ts
 +++ b/packages/excalidraw/actions/types.ts
-@@ -139,6 +139,8 @@ export type ActionName =
+@@ -139,6 +139,10 @@ export type ActionName =
    | "linkToElement"
    | "cropEditor"
    | "wrapSelectionInFrame"
 +  | "autoResizeFrame"
++  | "autoLayoutFrameVertical"
++  | "autoLayoutFrameHorizontal"
 +  | "toggleFrameClip"
    | "toggleShapeSwitch"
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 8832af15f..cd1c0bbce 100644
+index 3e07f92..0bb3669 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -259,6 +259,7 @@ import {
+@@ -259,6 +259,10 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
    isNonDeletedElement,
 +  getNonDeletedElements,
++  DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++  layoutAutoLayoutFrames,
++  layoutFrameChildren,
  } from "@excalidraw/element";
  
  import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
-@@ -335,6 +336,8 @@ import {
+@@ -335,6 +339,10 @@ import {
    actionRemoveAllElementsFromFrame,
    actionSelectAllElementsInFrame,
    actionWrapSelectionInFrame,
 +  actionAutoResizeFrame,
++  actionAutoLayoutFrameHorizontal,
++  actionAutoLayoutFrameVertical,
 +  actionToggleFrameClip,
  } from "../actions/actionFrame";
  import { createRedoAction, createUndoAction } from "../actions/actionHistory";
  import { actionTextAutoResize } from "../actions/actionTextAutoResize";
-@@ -786,6 +789,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -787,6 +795,11 @@ class App extends React.Component<AppProps, AppState> {
        refreshTextElementDimensions: this.refreshTextElementDimensions,
        rerouteElbowArrow: this.rerouteElbowArrow,
        rotateSelectedElements: this.rotateSelectedElements,
 +      autoResizeFrame: this.autoResizeFrame,
++      autoLayoutFrame: this.autoLayoutFrame,
++      updateFrameLayout: this.updateFrameLayout,
++      getFrameLayout: this.getFrameLayout,
 +      toggleFrameClip: this.toggleFrameClip,
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -5188,6 +5193,59 @@ class App extends React.Component<AppProps, AppState> {
+@@ -5189,6 +5202,155 @@ class App extends React.Component<AppProps, AppState> {
        return rotated;
      };
  
@@ -417,6 +685,102 @@ index 8832af15f..cd1c0bbce 100644
 +    return true;
 +  };
 +
++  public autoLayoutFrame: ExcalidrawImperativeAPI["autoLayoutFrame"] = (
++    frameId,
++    direction,
++    opts = {},
++  ) => {
++    return this.updateFrameLayout(frameId, {
++      autoLayout: direction,
++      width: opts.width,
++      height: opts.height,
++      padding: opts.padding,
++    });
++  };
++
++  public updateFrameLayout: ExcalidrawImperativeAPI["updateFrameLayout"] = (
++    frameId,
++    opts,
++  ) => {
++    const elementsMap = this.scene.getNonDeletedElementsMap();
++    const frame = elementsMap.get(frameId);
++
++    if (!frame || !isFrameLikeElement(frame)) {
++      return false;
++    }
++
++    const padding =
++      typeof opts.padding === "number"
++        ? {
++            horizontal: opts.padding,
++            vertical: opts.padding,
++          }
++        : {
++            horizontal:
++              opts.padding?.horizontal ??
++              frame.autoLayoutPadding?.horizontal ??
++              DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++            vertical:
++              opts.padding?.vertical ??
++              frame.autoLayoutPadding?.vertical ??
++              DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++          };
++
++    const autoLayout =
++      opts.autoLayout !== undefined ? opts.autoLayout : frame.autoLayout;
++
++    mutateElement(frame, elementsMap, {
++      autoLayout,
++      autoLayoutPadding: padding,
++      ...(opts.width !== undefined ? { width: opts.width } : null),
++      ...(opts.height !== undefined ? { height: opts.height } : null),
++    });
++
++    if (autoLayout) {
++      layoutFrameChildren(
++        frame,
++        this.scene.getElementsMapIncludingDeleted(),
++        autoLayout,
++        {
++          width: opts.width,
++          height: opts.height,
++          padding,
++        },
++      );
++    }
++
++    this.scene.triggerUpdate();
++    return true;
++  };
++
++  public getFrameLayout: ExcalidrawImperativeAPI["getFrameLayout"] = (
++    frameId,
++  ) => {
++    const frame = this.scene.getNonDeletedElement(frameId);
++
++    if (!frame || !isFrameLikeElement(frame)) {
++      return null;
++    }
++
++    return {
++      id: frame.id,
++      x: frame.x,
++      y: frame.y,
++      width: frame.width,
++      height: frame.height,
++      autoLayout: frame.autoLayout,
++      autoLayoutPadding: {
++        horizontal:
++          frame.autoLayoutPadding?.horizontal ??
++          DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++        vertical:
++          frame.autoLayoutPadding?.vertical ??
++          DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++      },
++      clip: frame.clip,
++    };
++  };
++
 +  public toggleFrameClip: ExcalidrawImperativeAPI["toggleFrameClip"] = (
 +    frameId,
 +    clip,
@@ -439,7 +803,7 @@ index 8832af15f..cd1c0bbce 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -10838,15 +10896,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -10868,15 +11030,11 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -460,43 +824,88 @@ index 8832af15f..cd1c0bbce 100644
          // Only update the state if there is a difference
          this.updateFrameToHighlight(frameToHighlight);
  
-@@ -13663,6 +13717,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11944,6 +12102,17 @@ class App extends React.Component<AppProps, AppState> {
+             isDragging: false,
+           },
+         );
++
++        const frame =
++          newElement.frameId &&
++          this.scene.getNonDeletedElement(newElement.frameId);
++        if (frame && isFrameLikeElement(frame) && frame.autoLayout) {
++          layoutFrameChildren(
++            frame,
++            this.scene.getElementsMapIncludingDeleted(),
++          );
++        }
++
+         // the above does not guarantee the scene to be rendered again, hence the trigger below
+         this.scene.triggerUpdate();
+       }
+@@ -12077,6 +12246,8 @@ class App extends React.Component<AppProps, AppState> {
+             this,
+           );
+ 
++          layoutAutoLayoutFrames(nextElements);
++
+           this.scene.replaceAllElements(nextElements);
+         }
+       }
+@@ -12120,6 +12291,8 @@ class App extends React.Component<AppProps, AppState> {
+           );
+         }
+ 
++        layoutAutoLayoutFrames(nextElements);
++
+         this.scene.replaceAllElements(nextElements);
+       }
+ 
+@@ -13704,6 +13877,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
 +      actionAutoResizeFrame,
++      actionAutoLayoutFrameVertical,
++      actionAutoLayoutFrameHorizontal,
 +      actionToggleFrameClip,
        CONTEXT_MENU_SEPARATOR,
        actionToggleCropEditor,
        CONTEXT_MENU_SEPARATOR,
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
-index a6987e9df..8e9574497 100644
+index cee1002..241ade9 100644
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
-@@ -699,6 +699,7 @@ export const restoreElement = (
+@@ -715,6 +715,12 @@ export const restoreElement = (
      case "frame":
        return restoreElementWithProperties(element, {
          name: element.name ?? null,
 +        clip: element.clip ?? true,
++        autoLayout: element.autoLayout ?? null,
++        autoLayoutPadding: element.autoLayoutPadding ?? {
++          horizontal: 16,
++          vertical: 16,
++        },
        });
  
      // Don't use default case so as to catch a missing an element type case.
 diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
-index 512f0d503..3eb6ddfbf 100644
+index 512f0d5..1d20d61 100644
 --- a/packages/excalidraw/locales/en.json
 +++ b/packages/excalidraw/locales/en.json
-@@ -184,6 +184,9 @@
+@@ -184,6 +184,11 @@
      "copyElementLink": "Copy link to object",
      "linkToElement": "Link to object",
      "wrapSelectionInFrame": "Wrap selection in frame",
 +    "autoResizeFrame": "Auto-resize frame to fit content",
++    "autoLayoutFrameVertical": "Auto layout vertical",
++    "autoLayoutFrameHorizontal": "Auto layout horizontal",
 +    "clipFrameContent": "Clip content",
 +    "unclipFrameContent": "Unclip content",
      "tab": "Tab",
      "shapeSwitch": "Switch shape",
      "preferences": "Preferences",
 diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
-index 2ecef953e..4142ba82a 100644
+index 2ecef95..4142ba8 100644
 --- a/packages/excalidraw/renderer/renderNewElementScene.ts
 +++ b/packages/excalidraw/renderer/renderNewElementScene.ts
 @@ -5,6 +5,7 @@ import {
@@ -532,7 +941,7 @@ index 2ecef953e..4142ba82a 100644
        }
  
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index 278359994..f1691c527 100644
+index 2783599..f1691c5 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
 @@ -10,6 +10,7 @@ import { createPlaceholderEmbeddableLabel } from "@excalidraw/element";
@@ -702,10 +1111,40 @@ index 278359994..f1691c527 100644
            render();
            context.restore();
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 15768b78a..d35679c3e 100644
+index 9a4dc37..3c5c927 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -1238,6 +1238,27 @@ export interface ExcalidrawImperativeAPI {
+@@ -1197,6 +1197,29 @@ export type ExcalidrawImperativeAPIEventMap = {
+   "editor:unmount": [];
+ };
+ 
++export type FrameAutoLayoutDirection = "vertical" | "horizontal";
++
++export type FrameAutoLayoutPadding =
++  | number
++  | Partial<{
++      horizontal: number;
++      vertical: number;
++    }>;
++
++export type FrameLayoutSettings = {
++  id: string;
++  x: number;
++  y: number;
++  width: number;
++  height: number;
++  autoLayout: FrameAutoLayoutDirection | null;
++  autoLayoutPadding: {
++    horizontal: number;
++    vertical: number;
++  };
++  clip: boolean;
++};
++
+ export interface ExcalidrawImperativeAPI {
+   /** Whether the editor has been unmounted and the API is no longer usable. */
+   isDestroyed: boolean;
+@@ -1241,6 +1264,59 @@ export interface ExcalidrawImperativeAPI {
    ) => boolean;
    refreshTextElementDimensions: (elementIds?: string | string[]) => boolean;
    rerouteElbowArrow: (elementId: string) => boolean;
@@ -721,6 +1160,38 @@ index 15768b78a..d35679c3e 100644
 +    opts?: { padding?: number },
 +  ) => boolean;
 +  /**
++   * Enables frame auto-layout and arranges its child elements.
++   * @param frameId - The ID of the frame to layout
++   * @param direction - Layout direction, or null to disable auto-layout
++   * @returns true if the frame was updated, false if the frame was not found or has no children
++   */
++  autoLayoutFrame: (
++    frameId: string,
++    direction: FrameAutoLayoutDirection | null,
++    opts?: {
++      width?: number;
++      height?: number;
++      padding?: FrameAutoLayoutPadding;
++    },
++  ) => boolean;
++  /**
++   * Updates frame layout settings, including width, height, auto-layout direction,
++   * and horizontal/vertical padding.
++   */
++  updateFrameLayout: (
++    frameId: string,
++    opts: {
++      autoLayout?: FrameAutoLayoutDirection | null;
++      width?: number;
++      height?: number;
++      padding?: FrameAutoLayoutPadding;
++    },
++  ) => boolean;
++  /**
++   * Returns the current frame dimensions and layout settings.
++   */
++  getFrameLayout: (frameId: string) => FrameLayoutSettings | null;
++  /**
 +   * Toggles whether a frame clips its child elements.
 +   * @param frameId - The ID of the frame to toggle clipping for
 +   * @param clip - Optional explicit value. If not provided, toggles the current state.
@@ -733,46 +1204,3 @@ index 15768b78a..d35679c3e 100644
    toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
    getEditorInterface: () => EditorInterface;
    /**
-diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
-index 22c3ed494..a11d7e3ee 100644
---- a/packages/element/src/renderElement.ts
-+++ b/packages/element/src/renderElement.ts
-@@ -737,26 +737,31 @@ export const renderElement = (
-   switch (element.type) {
-     case "magicframe":
-     case "frame": {
-+      // NOTE: Frame backgrounds are rendered in a separate pass BEFORE children
-+      // (see renderFrameBackgrounds in staticScene.ts)
-+      // This case only handles the frame outline/stroke which renders AFTER children
-       if (appState.frameRendering.enabled && appState.frameRendering.outline) {
-         context.save();
-         context.translate(
-           element.x + appState.scrollX,
-           element.y + appState.scrollY,
-         );
--        context.fillStyle = "rgba(0, 0, 200, 0.04)";
--
--        context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
--        context.strokeStyle = applyDarkModeFilter(
--          FRAME_STYLE.strokeColor,
--          appState.theme === THEME.DARK,
--        );
- 
-         // TODO change later to only affect AI frames
-         if (isMagicFrameElement(element)) {
-+          // Use special color for magic frames
-           context.strokeStyle =
-             appState.theme === THEME.LIGHT
-               ? "#7affd7"
-               : applyDarkModeFilter("#1d8264");
-+          context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
-+        } else {
-+          // Use element's own stroke properties
-+          context.strokeStyle = applyDarkModeFilter(
-+            element.strokeColor,
-+            appState.theme === THEME.DARK,
-+          );
-+          context.lineWidth = element.strokeWidth / appState.zoom.value;
-         }
- 
-         if (FRAME_STYLE.radius && context.roundRect) {

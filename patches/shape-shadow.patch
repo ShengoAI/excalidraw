@@ -1,0 +1,250 @@
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+index 591a6a2..6b5dc66 100644
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -73,6 +73,7 @@ export type ElementConstructorOpts = MarkOptional<
+   | "roundness"
+   | "locked"
+   | "opacity"
++  | "shadow"
+   | "customData"
+ >;
+ 
+@@ -88,6 +89,7 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     strokeStyle = DEFAULT_ELEMENT_PROPS.strokeStyle,
+     roughness = DEFAULT_ELEMENT_PROPS.roughness,
+     opacity = DEFAULT_ELEMENT_PROPS.opacity,
++    shadow = null,
+     width = 0,
+     height = 0,
+     angle = 0 as Radians,
+@@ -142,6 +144,7 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     strokeStyle,
+     roughness,
+     opacity,
++    shadow,
+     groupIds,
+     frameId,
+     index,
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+index a11d7e3..bde7242 100644
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -91,19 +91,54 @@ const isPendingImageElement = (
+   !renderConfig.imageCache.has(element.fileId);
+ 
+ const getCanvasPadding = (element: ExcalidrawElement) => {
++  let padding: number;
++
+   switch (element.type) {
+     case "freedraw":
+-      return element.strokeWidth * 12;
++      padding = element.strokeWidth * 12;
++      break;
+     case "text":
+-      return element.fontSize / 2;
++      padding = element.fontSize / 2;
++      break;
+     case "arrow":
+       if (element.endArrowhead || element.endArrowhead) {
+-        return 40;
++        padding = 40;
++        break;
+       }
+-      return 20;
++      padding = 20;
++      break;
+     default:
+-      return 20;
++      padding = 20;
++      break;
++  }
++
++  if (!element.shadow) {
++    return padding;
++  }
++
++  return Math.max(
++    padding,
++    element.shadow.blur +
++      Math.max(
++        Math.abs(element.shadow.offsetX),
++        Math.abs(element.shadow.offsetY),
++      ),
++  );
++};
++
++const applyElementShadow = (
++  context: CanvasRenderingContext2D,
++  element: ExcalidrawElement,
++  scale = 1,
++) => {
++  if (!element.shadow) {
++    return;
+   }
++
++  context.shadowColor = element.shadow.color;
++  context.shadowBlur = element.shadow.blur * scale;
++  context.shadowOffsetX = element.shadow.offsetX * scale;
++  context.shadowOffsetY = element.shadow.offsetY * scale;
+ };
+ 
+ export const getRenderOpacity = (
+@@ -654,6 +689,8 @@ const drawElementFromCanvas = (
+   // revert afterwards we don't have account for it during drawing
+   context.translate(-cx, -cy);
+ 
++  applyElementShadow(context, element, window.devicePixelRatio);
++
+   context.drawImage(
+     elementWithCanvas.canvas!,
+     (x1 + appState.scrollX) * window.devicePixelRatio -
+@@ -792,6 +829,7 @@ export const renderElement = (
+         const shiftY = (y2 - y1) / 2 - (element.y - y1);
+         context.save();
+         context.translate(cx, cy);
++        applyElementShadow(context, element);
+         context.rotate(element.angle);
+         context.translate(-shiftX, -shiftY);
+         drawElementOnCanvas(element, rc, context, renderConfig);
+@@ -850,6 +888,7 @@ export const renderElement = (
+         }
+         context.save();
+         context.translate(cx, cy);
++        applyElementShadow(context, element);
+ 
+         const boundTextElement = getBoundTextElement(element, elementsMap);
+ 
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+index e0c6206..56ca1ef 100644
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -27,6 +27,12 @@ export type StrokeRoundness = "round" | "sharp";
+ export type RoundnessType = ValueOf<typeof ROUNDNESS>;
+ export type StrokeStyle = "solid" | "dashed" | "dotted";
+ export type TextAlign = typeof TEXT_ALIGN[keyof typeof TEXT_ALIGN];
++export type ElementShadow = Readonly<{
++  color: string;
++  blur: number;
++  offsetX: number;
++  offsetY: number;
++}>;
+ 
+ type VerticalAlignKeys = keyof typeof VERTICAL_ALIGN;
+ export type VerticalAlign = typeof VERTICAL_ALIGN[VerticalAlignKeys];
+@@ -49,6 +55,7 @@ type _ExcalidrawElementBase = Readonly<{
+   roundness: null | { type: RoundnessType; value?: number };
+   roughness: number;
+   opacity: number;
++  shadow?: ElementShadow | null;
+   width: number;
+   height: number;
+   angle: Radians;
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 05f848d..88cd2fe 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -768,6 +768,7 @@ class App extends React.Component<AppProps, AppState> {
+       updateScene: this.updateScene,
+       applyDeltas: this.applyDeltas,
+       mutateElement: this.mutateElement,
++      updateElementShadow: this.updateElementShadow,
+       updateLibrary: this.library.updateLibrary,
+       addFiles: this.addFiles,
+       resetScene: this.resetScene,
+@@ -5584,6 +5585,41 @@ class App extends React.Component<AppProps, AppState> {
+     });
+   };
+ 
++  public updateElementShadow: ExcalidrawImperativeAPI["updateElementShadow"] = (
++    elementIds,
++    shadow,
++  ) => {
++    const ids = Array.isArray(elementIds) ? elementIds : [elementIds];
++    let didUpdate = false;
++
++    for (const id of ids) {
++      const element = this.scene.getElement(id);
++
++      if (!element || element.isDeleted) {
++        continue;
++      }
++
++      this.scene.mutateElement(element, {
++        shadow:
++          shadow === null
++            ? null
++            : {
++                color: shadow.color ?? "rgba(0, 0, 0, 0.25)",
++                blur: shadow.blur ?? 12,
++                offsetX: shadow.offsetX ?? 0,
++                offsetY: shadow.offsetY ?? 4,
++              },
++      });
++      didUpdate = true;
++    }
++
++    if (didUpdate) {
++      this.scene.triggerUpdate();
++    }
++
++    return didUpdate;
++  };
++
+   public triggerRender = (
+     /** force always re-renders canvas even if no change */
+     force?: boolean,
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+index 9c9d7f7..2bbb4d8 100644
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -406,8 +406,9 @@ const repairBinding = <T extends ExcalidrawArrowElement>(
+ };
+ 
+ const restoreElementWithProperties = <
+-  T extends Required<Omit<ExcalidrawElement, "customData">> & {
++  T extends Required<Omit<ExcalidrawElement, "customData" | "shadow">> & {
+     customData?: ExcalidrawElement["customData"];
++    shadow?: ExcalidrawElement["shadow"];
+     /** @deprecated */
+     boundElementIds?: readonly ExcalidrawElement["id"][];
+     /** @deprecated */
+@@ -439,6 +440,7 @@ const restoreElementWithProperties = <
+     roughness: element.roughness ?? DEFAULT_ELEMENT_PROPS.roughness,
+     opacity:
+       element.opacity == null ? DEFAULT_ELEMENT_PROPS.opacity : element.opacity,
++    shadow: element.shadow ?? null,
+     angle: element.angle || (0 as Radians),
+     x: extra.x ?? element.x ?? 0,
+     y: extra.y ?? element.y ?? 0,
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index fff306d..da73508 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -35,6 +35,7 @@ import type {
+   BindMode,
+   ExcalidrawTextElement,
+   StrokeVariability,
++  ElementShadow,
+   NonDeletedSceneElementsMap,
+ } from "@excalidraw/element/types";
+ 
+@@ -1221,12 +1222,18 @@ export type FrameLayoutSettings = {
+   clip: boolean;
+ };
+ 
++export type ElementShadowOptions = null | Partial<ElementShadow>;
++
+ export interface ExcalidrawImperativeAPI {
+   /** Whether the editor has been unmounted and the API is no longer usable. */
+   isDestroyed: boolean;
+   updateScene: InstanceType<typeof App>["updateScene"];
+   applyDeltas: InstanceType<typeof App>["applyDeltas"];
+   mutateElement: InstanceType<typeof App>["mutateElement"];
++  updateElementShadow: (
++    elementIds: string | readonly string[],
++    shadow: ElementShadowOptions,
++  ) => boolean;
+   updateLibrary: InstanceType<typeof Library>["updateLibrary"];
+   resetScene: InstanceType<typeof App>["resetScene"];
+   getSceneElementsIncludingDeleted: InstanceType<

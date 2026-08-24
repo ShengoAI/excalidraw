@@ -1,5 +1,29 @@
+diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
+index b9916b017..2ba0fb121 100644
+--- a/packages/common/src/constants.ts
++++ b/packages/common/src/constants.ts
+@@ -203,12 +203,19 @@ export const FRAME_STYLE = {
+   backgroundColor: "transparent" as ExcalidrawElement["backgroundColor"],
+   radius: 8,
+   nameOffsetY: 3,
++  nameInsetX: 16,
++  nameInsetY: 12,
+   nameColorLightTheme: "#999999",
+   nameColorDarkTheme: "#7a7a7a",
+   nameFontSize: 14,
+   nameLineHeight: 1.25,
+ };
+ 
++/** Height of the in-frame title block (top inset + line height), excluding the gap below it. */
++export const FRAME_TITLE_BLOCK_HEIGHT =
++  FRAME_STYLE.nameInsetY +
++  FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight;
++
+ export const MIN_FONT_SIZE = 1;
+ export const DEFAULT_FONT_SIZE = 20;
+ export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
-index 287fdf2..10131a7 100644
+index 287fdf2df..10131a7ed 100644
 --- a/packages/element/src/dragElements.ts
 +++ b/packages/element/src/dragElements.ts
 @@ -103,14 +103,27 @@ export const dragSelectedElements = (
@@ -39,20 +63,46 @@ index 287fdf2..10131a7 100644
      }
    }
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf2..8b03325 100644
+index bc2cdf285..e33d52961 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -46,6 +46,9 @@ import type {
+@@ -1,4 +1,4 @@
+-import { arrayToMap } from "@excalidraw/common";
++import { arrayToMap, FRAME_TITLE_BLOCK_HEIGHT } from "@excalidraw/common";
+ import {
+   isPointWithinBounds,
+   pointFrom,
+@@ -46,6 +46,29 @@ import type {
    NonDeletedExcalidrawElement,
  } from "./types";
  
 +export const DEFAULT_FRAME_AUTO_LAYOUT_PADDING = 16;
++export const DEFAULT_FRAME_CONTENT_PADDING_Y = 12;
 +export const DEFAULT_FRAME_AUTO_LAYOUT_GAP = 16;
++// Title block height (nameInsetY 12 + nameFontSize * nameLineHeight 17.5 = 29.5).
++// The 12px gap below the title is padding.vertical, not part of this constant.
++export const DEFAULT_FRAME_TITLE_HEIGHT = FRAME_TITLE_BLOCK_HEIGHT;
++
++export const getFittedFrameGeometry = (
++  childBounds: readonly [number, number, number, number],
++  padding: { horizontal?: number; vertical?: number } = {},
++) => {
++  const padX = padding.horizontal ?? DEFAULT_FRAME_AUTO_LAYOUT_PADDING;
++  const padY = padding.vertical ?? DEFAULT_FRAME_CONTENT_PADDING_Y;
++  const [x1, y1, x2, y2] = childBounds;
++
++  return {
++    x: x1 - padX,
++    y: y1 - DEFAULT_FRAME_TITLE_HEIGHT - padY,
++    width: x2 - x1 + padX * 2,
++    height: y2 - y1 + DEFAULT_FRAME_TITLE_HEIGHT + padY * 2,
++  };
++};
 +
  // --------------------------- Frame State ------------------------------------
  export const bindElementsToFramesAfterDuplication = (
    nextElements: readonly ExcalidrawElement[],
-@@ -95,11 +98,11 @@ export const getElementsCompletelyInFrame = (
+@@ -95,11 +118,11 @@ export const getElementsCompletelyInFrame = (
    frame: ExcalidrawFrameLikeElement,
    elementsMap: ElementsMap,
  ) =>
@@ -68,7 +118,7 @@ index bc2cdf2..8b03325 100644
        element.frameId === frame.id,
    );
  
-@@ -444,6 +447,141 @@ export const getContainingFrame = (
+@@ -444,6 +467,144 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -119,7 +169,7 @@ index bc2cdf2..8b03325 100644
 +    vertical:
 +      opts.padding?.vertical ??
 +      frame.autoLayoutPadding?.vertical ??
-+      DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++      DEFAULT_FRAME_CONTENT_PADDING_Y,
 +  };
 +  const gap =
 +    opts.gap ?? frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
@@ -142,7 +192,8 @@ index bc2cdf2..8b03325 100644
 +  }
 +
 +  let cursorX = frame.x + padding.horizontal;
-+  let cursorY = frame.y + padding.vertical;
++  // Add title height offset so children start below the frame title
++  let cursorY = frame.y + DEFAULT_FRAME_TITLE_HEIGHT + padding.vertical;
 +  let contentWidth = 0;
 +  let contentHeight = 0;
 +
@@ -179,7 +230,9 @@ index bc2cdf2..8b03325 100644
 +  }
 +
 +  const contentFrameWidth = contentWidth + padding.horizontal * 2;
-+  const contentFrameHeight = contentHeight + padding.vertical * 2;
++  // Include title height in the frame height calculation
++  const contentFrameHeight =
++    contentHeight + DEFAULT_FRAME_TITLE_HEIGHT + padding.vertical * 2;
 +
 +  mutateElement(frame, elementsMap, {
 +    width: Math.max(opts.width ?? frame.width, contentFrameWidth),
@@ -210,7 +263,7 @@ index bc2cdf2..8b03325 100644
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +604,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +627,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -229,7 +282,7 @@ index bc2cdf2..8b03325 100644
        continue;
      }
  
-@@ -521,7 +661,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+@@ -521,7 +684,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
  export const getFrameChildrenInsertionIndex = (
    elements: readonly ExcalidrawElement[],
    frameId: ExcalidrawFrameLikeElement["id"],
@@ -253,7 +306,7 @@ index bc2cdf2..8b03325 100644
    for (let index = elements.length - 1; index >= 0; index--) {
      const element = elements[index];
  
-@@ -566,11 +722,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +745,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -272,7 +325,7 @@ index bc2cdf2..8b03325 100644
        continue;
      }
  
-@@ -610,9 +768,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -610,9 +791,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
    const otherElements = Array.from(allElements.values()).filter(
      (element) => !finalElementsToAdd.has(element),
    );
@@ -286,7 +339,7 @@ index bc2cdf2..8b03325 100644
    );
  
    if (insertionIndex === null) {
-@@ -725,9 +887,9 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,9 +910,9 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -297,7 +350,7 @@ index bc2cdf2..8b03325 100644
        !isElementInFrame(element, elementsMap, appState)
      ) {
        elementsToRemove.add(element);
-@@ -919,6 +1081,11 @@ export const shouldApplyFrameClip = (
+@@ -919,6 +1104,11 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -309,8 +362,17 @@ index bc2cdf2..8b03325 100644
    // for individual elements, only clip when the element is
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
+@@ -968,7 +1158,7 @@ export const shouldApplyFrameClip = (
+   return false;
+ };
+ 
+-const DEFAULT_FRAME_NAME = "Frame";
++const DEFAULT_FRAME_NAME = "Container";
+ const DEFAULT_AI_FRAME_NAME = "AI Frame";
+ 
+ export const getDefaultFrameName = (element: ExcalidrawFrameLikeElement) => {
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index d1c2139..591a6a2 100644
+index d1c2139db..f9b6a4f5e 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -187,6 +187,10 @@ export const newIframeElement = (
@@ -332,7 +394,7 @@ index d1c2139..591a6a2 100644
 +      autoLayout: opts?.autoLayout ?? null,
 +      autoLayoutPadding: opts?.autoLayoutPadding ?? {
 +        horizontal: 16,
-+        vertical: 16,
++        vertical: 12,
 +      },
 +      autoLayoutGap: opts?.autoLayoutGap ?? 16,
      },
@@ -357,14 +419,14 @@ index d1c2139..591a6a2 100644
 +      autoLayout: opts?.autoLayout ?? null,
 +      autoLayoutPadding: opts?.autoLayoutPadding ?? {
 +        horizontal: 16,
-+        vertical: 16,
++        vertical: 12,
 +      },
 +      autoLayoutGap: opts?.autoLayoutGap ?? 16,
      },
      {},
    );
 diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
-index 22c3ed4..a11d7e3 100644
+index 22c3ed494..a11d7e3ee 100644
 --- a/packages/element/src/renderElement.ts
 +++ b/packages/element/src/renderElement.ts
 @@ -737,26 +737,31 @@ export const renderElement = (
@@ -407,7 +469,7 @@ index 22c3ed4..a11d7e3 100644
  
          if (FRAME_STYLE.radius && context.roundRect) {
 diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
-index 90ecdaf..e0c6206 100644
+index 90ecdafe8..e0c620622 100644
 --- a/packages/element/src/types.ts
 +++ b/packages/element/src/types.ts
 @@ -163,11 +163,25 @@ export type InitializedExcalidrawImageElement = MarkNonNullable<
@@ -437,18 +499,19 @@ index 90ecdaf..e0c6206 100644
  
  export type ExcalidrawFrameLikeElement =
 diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
-index 6ffcc5f..584240f 100644
+index 6ffcc5f5e..89de86e75 100644
 --- a/packages/excalidraw/actions/actionFrame.ts
 +++ b/packages/excalidraw/actions/actionFrame.ts
-@@ -4,6 +4,7 @@ import { newFrameElement } from "@excalidraw/element";
+@@ -4,6 +4,8 @@ import { newFrameElement } from "@excalidraw/element";
  import { isFrameLikeElement } from "@excalidraw/element";
  import {
    addElementsToFrame,
++  getFittedFrameGeometry,
 +  layoutFrameChildren,
    removeAllElementsFromFrame,
  } from "@excalidraw/element";
  import { getFrameChildren } from "@excalidraw/element";
-@@ -129,10 +130,8 @@ export const actionWrapSelectionInFrame = register({
+@@ -129,23 +131,15 @@ export const actionWrapSelectionInFrame = register({
    predicate: (elements, appState, _, app) => {
      const selectedElements = getSelectedElements(elements, appState);
  
@@ -461,7 +524,21 @@ index 6ffcc5f..584240f 100644
    },
    perform: (elements, appState, _, app) => {
      const selectedElements = getSelectedElements(elements, appState);
-@@ -178,3 +177,179 @@ export const actionWrapSelectionInFrame = register({
+     const elementsMap = app.scene.getNonDeletedElementsMap();
+ 
+     const [x1, y1, x2, y2] = getCommonBounds(selectedElements, elementsMap);
+-    const PADDING = 16;
+-    const frame = newFrameElement({
+-      x: x1 - PADDING,
+-      y: y1 - PADDING,
+-      width: x2 - x1 + PADDING * 2,
+-      height: y2 - y1 + PADDING * 2,
+-    });
++    const frame = newFrameElement(getFittedFrameGeometry([x1, y1, x2, y2]));
+ 
+     // for a selected partial group, we want to remove it from the remainder of the group
+     if (appState.editingGroupId) {
+@@ -178,3 +172,180 @@ export const actionWrapSelectionInFrame = register({
      };
    },
  });
@@ -512,14 +589,15 @@ index 6ffcc5f..584240f 100644
 +    }
 +
 +    const [x1, y1, x2, y2] = getCommonBounds(childElements, elementsMap);
-+    const PADDING = 16;
 +
-+    mutateElement(selectedElement, elementsMap, {
-+      x: x1 - PADDING,
-+      y: y1 - PADDING,
-+      width: x2 - x1 + PADDING * 2,
-+      height: y2 - y1 + PADDING * 2,
-+    });
++    mutateElement(
++      selectedElement,
++      elementsMap,
++      getFittedFrameGeometry([x1, y1, x2, y2], {
++        horizontal: selectedElement.autoLayoutPadding?.horizontal,
++        vertical: selectedElement.autoLayoutPadding?.vertical,
++      }),
++    );
 +
 +    return {
 +      elements,
@@ -642,7 +720,7 @@ index 6ffcc5f..584240f 100644
 +  },
 +});
 diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
-index fa13b7a..a9711f8 100644
+index fa13b7a60..a9711f82f 100644
 --- a/packages/excalidraw/actions/types.ts
 +++ b/packages/excalidraw/actions/types.ts
 @@ -139,6 +139,10 @@ export type ActionName =
@@ -657,22 +735,24 @@ index fa13b7a..a9711f8 100644
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 3e07f92..05f848d 100644
+index 3e07f9254..9b3d12a1c 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -259,6 +259,11 @@ import {
+@@ -259,6 +259,13 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
    isNonDeletedElement,
 +  getNonDeletedElements,
 +  DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++  DEFAULT_FRAME_CONTENT_PADDING_Y,
 +  DEFAULT_FRAME_AUTO_LAYOUT_GAP,
++  getFittedFrameGeometry,
 +  layoutAutoLayoutFrames,
 +  layoutFrameChildren,
  } from "@excalidraw/element";
  
  import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
-@@ -335,6 +340,10 @@ import {
+@@ -335,6 +342,10 @@ import {
    actionRemoveAllElementsFromFrame,
    actionSelectAllElementsInFrame,
    actionWrapSelectionInFrame,
@@ -683,7 +763,7 @@ index 3e07f92..05f848d 100644
  } from "../actions/actionFrame";
  import { createRedoAction, createUndoAction } from "../actions/actionHistory";
  import { actionTextAutoResize } from "../actions/actionTextAutoResize";
-@@ -787,6 +796,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -787,6 +798,11 @@ class App extends React.Component<AppProps, AppState> {
        refreshTextElementDimensions: this.refreshTextElementDimensions,
        rerouteElbowArrow: this.rerouteElbowArrow,
        rotateSelectedElements: this.rotateSelectedElements,
@@ -695,7 +775,60 @@ index 3e07f92..05f848d 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -5189,6 +5203,161 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2204,7 +2220,7 @@ class App extends React.Component<AppProps, AppState> {
+               borderRadius: 4,
+               boxShadow: "inset 0 0 0 1px var(--color-primary)",
+               fontFamily: "Assistant",
+-              fontSize: `${FRAME_STYLE.nameFontSize}px`,
++              fontSize: `${FRAME_STYLE.nameFontSize * this.state.zoom.value}px`,
+               transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
+               color: isDarkTheme
+                 ? FRAME_STYLE.nameColorDarkTheme
+@@ -2232,20 +2248,19 @@ class App extends React.Component<AppProps, AppState> {
+           key={f.id}
+           style={{
+             position: "absolute",
+-            // Positioning from bottom so that we don't to either
+-            // calculate text height or adjust using transform (which)
+-            // messes up input position when editing the frame name.
+-            // This makes the positioning deterministic and we can calculate
+-            // the same position when rendering to canvas / svg.
+-            bottom: `${
+-              this.state.height +
+-              FRAME_STYLE.nameOffsetY -
++            // Position the frame name inside the frame at top-left
++            top: `${
+               y1 +
++              FRAME_STYLE.nameInsetY * this.state.zoom.value -
+               this.state.offsetTop
+             }px`,
+-            left: `${x1 - this.state.offsetLeft}px`,
++            left: `${
++              x1 +
++              FRAME_STYLE.nameInsetX * this.state.zoom.value -
++              this.state.offsetLeft
++            }px`,
+             zIndex: 2,
+-            fontSize: FRAME_STYLE.nameFontSize,
++            fontSize: FRAME_STYLE.nameFontSize * this.state.zoom.value,
+             color: isDarkTheme
+               ? FRAME_STYLE.nameColorDarkTheme
+               : FRAME_STYLE.nameColorLightTheme,
+@@ -2254,7 +2269,12 @@ class App extends React.Component<AppProps, AppState> {
+             maxWidth:
+               focusedSearchMatch?.id === f.id && focusedSearchMatch?.focus
+                 ? "none"
+-                : `${f.width * this.state.zoom.value}px`,
++                : `${
++                    Math.max(
++                      0,
++                      f.width - FRAME_STYLE.nameInsetX * 2,
++                    ) * this.state.zoom.value
++                  }px`,
+             overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
+             whiteSpace: "nowrap",
+             textOverflow: "ellipsis",
+@@ -5189,6 +5209,163 @@ class App extends React.Component<AppProps, AppState> {
        return rotated;
      };
  
@@ -720,14 +853,16 @@ index 3e07f92..05f848d 100644
 +    }
 +
 +    const [x1, y1, x2, y2] = getCommonBounds(childElements, elementsMap);
-+    const padding = opts.padding ?? 16;
++    const padding =
++      opts.padding === undefined
++        ? undefined
++        : { horizontal: opts.padding, vertical: opts.padding };
 +
-+    mutateElement(frame, elementsMap, {
-+      x: x1 - padding,
-+      y: y1 - padding,
-+      width: x2 - x1 + padding * 2,
-+      height: y2 - y1 + padding * 2,
-+    });
++    mutateElement(
++      frame,
++      elementsMap,
++      getFittedFrameGeometry([x1, y1, x2, y2], padding),
++    );
 +
 +    this.scene.triggerUpdate();
 +    return true;
@@ -772,7 +907,7 @@ index 3e07f92..05f848d 100644
 +            vertical:
 +              opts.padding?.vertical ??
 +              frame.autoLayoutPadding?.vertical ??
-+              DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++              DEFAULT_FRAME_CONTENT_PADDING_Y,
 +          };
 +
 +    const autoLayout =
@@ -827,7 +962,7 @@ index 3e07f92..05f848d 100644
 +          DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
 +        vertical:
 +          frame.autoLayoutPadding?.vertical ??
-+          DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++          DEFAULT_FRAME_CONTENT_PADDING_Y,
 +      },
 +      autoLayoutGap:
 +        frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP,
@@ -857,7 +992,7 @@ index 3e07f92..05f848d 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -10868,15 +11037,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -10868,15 +11045,11 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -878,7 +1013,7 @@ index 3e07f92..05f848d 100644
          // Only update the state if there is a difference
          this.updateFrameToHighlight(frameToHighlight);
  
-@@ -11944,6 +12109,17 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11944,6 +12117,17 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -896,7 +1031,7 @@ index 3e07f92..05f848d 100644
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12077,6 +12253,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12077,6 +12261,8 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -905,7 +1040,7 @@ index 3e07f92..05f848d 100644
            this.scene.replaceAllElements(nextElements);
          }
        }
-@@ -12120,6 +12298,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12120,6 +12306,8 @@ class App extends React.Component<AppProps, AppState> {
            );
          }
  
@@ -914,7 +1049,7 @@ index 3e07f92..05f848d 100644
          this.scene.replaceAllElements(nextElements);
        }
  
-@@ -13704,6 +13884,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13704,6 +13892,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -925,8 +1060,23 @@ index 3e07f92..05f848d 100644
        CONTEXT_MENU_SEPARATOR,
        actionToggleCropEditor,
        CONTEXT_MENU_SEPARATOR,
+diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
+index 3ecb79e4e..8d6709a59 100644
+--- a/packages/excalidraw/components/SearchMenu.tsx
++++ b/packages/excalidraw/components/SearchMenu.tsx
+@@ -758,8 +758,8 @@ const getMatchInFrame = (
+ 
+   const matchedMetrics = measureText(matchedText, font, lineHeight);
+ 
+-  const offsetX = offset.width;
+-  const offsetY = -offset.height - FRAME_STYLE.strokeWidth;
++  const offsetX = FRAME_STYLE.nameInsetX + offset.width;
++  const offsetY = FRAME_STYLE.nameInsetY;
+   const width = matchedMetrics.width;
+ 
+   return [
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
-index cee1002..9c9d7f7 100644
+index cee1002c2..e5d4ea9c7 100644
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
 @@ -715,6 +715,13 @@ export const restoreElement = (
@@ -937,21 +1087,34 @@ index cee1002..9c9d7f7 100644
 +        autoLayout: element.autoLayout ?? null,
 +        autoLayoutPadding: element.autoLayoutPadding ?? {
 +          horizontal: 16,
-+          vertical: 16,
++          vertical: 12,
 +        },
 +        autoLayoutGap: element.autoLayoutGap ?? 16,
        });
  
      // Don't use default case so as to catch a missing an element type case.
 diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
-index 512f0d5..1d20d61 100644
+index 512f0d503..a9c456728 100644
 --- a/packages/excalidraw/locales/en.json
 +++ b/packages/excalidraw/locales/en.json
-@@ -184,6 +184,11 @@
+@@ -167,8 +167,8 @@
+     },
+     "statusPublished": "Published",
+     "sidebarLock": "Keep sidebar open",
+-    "selectAllElementsInFrame": "Select all elements in frame",
+-    "removeAllElementsFromFrame": "Remove all elements from frame",
++    "selectAllElementsInFrame": "Select all elements in container",
++    "removeAllElementsFromFrame": "Remove all elements from container",
+     "eyeDropper": "Pick color from canvas",
+     "textToDiagram": "Text to diagram",
+     "prompt": "Prompt",
+@@ -183,7 +183,12 @@
+     "unCroppedDimension": "Uncropped dimension",
      "copyElementLink": "Copy link to object",
      "linkToElement": "Link to object",
-     "wrapSelectionInFrame": "Wrap selection in frame",
-+    "autoResizeFrame": "Auto-resize frame to fit content",
+-    "wrapSelectionInFrame": "Wrap selection in frame",
++    "wrapSelectionInFrame": "Wrap selection in container",
++    "autoResizeFrame": "Auto-resize container to fit content",
 +    "autoLayoutFrameVertical": "Auto layout vertical",
 +    "autoLayoutFrameHorizontal": "Auto layout horizontal",
 +    "clipFrameContent": "Clip content",
@@ -959,8 +1122,35 @@ index 512f0d5..1d20d61 100644
      "tab": "Tab",
      "shapeSwitch": "Switch shape",
      "preferences": "Preferences",
+@@ -216,7 +221,7 @@
+     "singleResult": "result",
+     "multipleResults": "results",
+     "placeholder": "Find text on canvas...",
+-    "frames": "Frames",
++    "frames": "Containers",
+     "texts": "Texts"
+   },
+   "buttons": {
+@@ -327,7 +332,7 @@
+     "penMode": "Pen mode - prevent touch",
+     "link": "Add / Update link for a selected shape",
+     "eraser": "Eraser",
+-    "frame": "Frame tool",
++    "frame": "Container tool",
+     "magicframe": "Wireframe to code",
+     "embeddable": "Web Embed",
+     "laser": "Laser pointer",
+@@ -347,7 +352,7 @@
+     "text": "Text",
+     "image": "Image",
+     "group": "Group",
+-    "frame": "Frame",
++    "frame": "Container",
+     "magicframe": "Wireframe to code",
+     "embeddable": "Web Embed",
+     "selection": "Selection",
 diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
-index 2ecef95..4142ba8 100644
+index 2ecef953e..4142ba82a 100644
 --- a/packages/excalidraw/renderer/renderNewElementScene.ts
 +++ b/packages/excalidraw/renderer/renderNewElementScene.ts
 @@ -5,6 +5,7 @@ import {
@@ -996,7 +1186,7 @@ index 2ecef95..4142ba8 100644
        }
  
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index 2783599..da65e7f 100644
+index 278359994..da65e7fa2 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
 @@ -10,6 +10,7 @@ import { createPlaceholderEmbeddableLabel } from "@excalidraw/element";
@@ -1181,8 +1371,68 @@ index 2783599..da65e7f 100644
            }
            render();
            context.restore();
+diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
+index 9216e4272..e5f36e4f3 100644
+--- a/packages/excalidraw/scene/export.ts
++++ b/packages/excalidraw/scene/export.ts
+@@ -111,8 +111,8 @@ const addFrameLabelsAsTextElements = (
+     if (isFrameLikeElement(element)) {
+       let textElement: Mutable<NonDeleted<ExcalidrawTextElement>> =
+         newTextElement({
+-          x: element.x,
+-          y: element.y - FRAME_STYLE.nameOffsetY,
++          x: element.x + FRAME_STYLE.nameInsetX,
++          y: element.y + FRAME_STYLE.nameInsetY,
+           fontFamily: FONT_FAMILY.Helvetica,
+           fontSize: FRAME_STYLE.nameFontSize,
+           lineHeight:
+@@ -122,9 +122,11 @@ const addFrameLabelsAsTextElements = (
+             : FRAME_STYLE.nameColorLightTheme,
+           text: getFrameLikeTitle(element),
+         });
+-      textElement.y -= textElement.height;
+ 
+-      textElement = truncateText(textElement, element.width);
++      textElement = truncateText(
++        textElement,
++        Math.max(0, element.width - FRAME_STYLE.nameInsetX * 2),
++      );
+ 
+       nextElements.push(textElement);
+     }
+diff --git a/packages/excalidraw/tests/scene/export.test.ts b/packages/excalidraw/tests/scene/export.test.ts
+index 4da68316d..1afe9567f 100644
+--- a/packages/excalidraw/tests/scene/export.test.ts
++++ b/packages/excalidraw/tests/scene/export.test.ts
+@@ -4,7 +4,6 @@ import {
+   applyDarkModeFilter,
+   BOUND_TEXT_PADDING,
+   FONT_FAMILY,
+-  FRAME_STYLE,
+ } from "@excalidraw/common";
+ 
+ import { pointFrom } from "@excalidraw/math";
+@@ -306,16 +305,8 @@ describe("exportToCanvas", () => {
+ });
+ 
+ describe("exporting frames", () => {
+-  const getFrameNameHeight = (exportType: "canvas" | "svg") => {
+-    const height =
+-      FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight +
+-      FRAME_STYLE.nameOffsetY;
+-    // canvas truncates dimensions to integers
+-    if (exportType === "canvas") {
+-      return Math.trunc(height);
+-    }
+-    return height;
+-  };
++  // Frame titles render inside the frame, so they no longer add export height.
++  const getFrameNameHeight = (_exportType: "canvas" | "svg") => 0;
+ 
+   // a few tests with exportToCanvas (where we can't inspect elements)
+   // ---------------------------------------------------------------------------
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 9a4dc37..fff306d 100644
+index 9a4dc372c..f920f5aaa 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
 @@ -1197,6 +1197,30 @@ export type ExcalidrawImperativeAPIEventMap = {
@@ -1216,15 +1466,16 @@ index 9a4dc37..fff306d 100644
  export interface ExcalidrawImperativeAPI {
    /** Whether the editor has been unmounted and the API is no longer usable. */
    isDestroyed: boolean;
-@@ -1241,6 +1265,61 @@ export interface ExcalidrawImperativeAPI {
+@@ -1241,6 +1265,62 @@ export interface ExcalidrawImperativeAPI {
    ) => boolean;
    refreshTextElementDimensions: (elementIds?: string | string[]) => boolean;
    rerouteElbowArrow: (elementId: string) => boolean;
 +  /**
 +   * Auto-resizes a frame to fit all its child elements with optional padding.
++   * Reserves space for the in-frame title so children do not overlap it.
 +   * @param frameId - The ID of the frame to resize
 +   * @param opts - Optional configuration
-+   * @param opts.padding - Padding around the content (default: 16)
++   * @param opts.padding - Padding around the content (default: 16px sides, 12px top/bottom below the title)
 +   * @returns true if the frame was resized, false if the frame was not found or has no children
 +   */
 +  autoResizeFrame: (

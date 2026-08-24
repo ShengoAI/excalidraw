@@ -1,0 +1,254 @@
+diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
+index 2ba0fb121..0e1a46e3f 100644
+--- a/packages/common/src/constants.ts
++++ b/packages/common/src/constants.ts
+@@ -106,6 +106,7 @@ export const CLASSES = {
+   CONVERT_ELEMENT_TYPE_POPUP: "ConvertElementTypePopup",
+   SHAPE_ACTIONS_THEME_SCOPE: "shape-actions-theme-scope",
+   FRAME_NAME: "frame-name",
++  SHAPE_FOOTER: "excalidraw__shape-footer",
+   DROPDOWN_MENU_EVENT_WRAPPER: "dropdown-menu-event-wrapper",
+ };
+ 
+@@ -216,6 +217,21 @@ export const FRAME_TITLE_BLOCK_HEIGHT =
+   FRAME_STYLE.nameInsetY +
+   FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight;
+ 
++export const SHAPE_FOOTER_PADDING = {
++  top: 16,
++  horizontal: 16,
++  bottom: 12,
++} as const;
++
++/** Default single-line footer label height (scene units). */
++export const SHAPE_FOOTER_CONTENT_HEIGHT = 16;
++
++/** Space reserved at the bottom of a shape/frame so children stay above the footer. */
++export const SHAPE_FOOTER_RESERVED_HEIGHT =
++  SHAPE_FOOTER_PADDING.top +
++  SHAPE_FOOTER_CONTENT_HEIGHT +
++  SHAPE_FOOTER_PADDING.bottom;
++
+ export const MIN_FONT_SIZE = 1;
+ export const DEFAULT_FONT_SIZE = 20;
+ export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index e33d52961..105609f7f 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1,4 +1,8 @@
+-import { arrayToMap, FRAME_TITLE_BLOCK_HEIGHT } from "@excalidraw/common";
++import {
++  arrayToMap,
++  FRAME_TITLE_BLOCK_HEIGHT,
++  SHAPE_FOOTER_RESERVED_HEIGHT,
++} from "@excalidraw/common";
+ import {
+   isPointWithinBounds,
+   pointFrom,
+@@ -65,7 +69,11 @@ export const getFittedFrameGeometry = (
+     x: x1 - padX,
+     y: y1 - DEFAULT_FRAME_TITLE_HEIGHT - padY,
+     width: x2 - x1 + padX * 2,
+-    height: y2 - y1 + DEFAULT_FRAME_TITLE_HEIGHT + padY * 2,
++    height:
++      y2 - y1 +
++      DEFAULT_FRAME_TITLE_HEIGHT +
++      padY +
++      SHAPE_FOOTER_RESERVED_HEIGHT,
+   };
+ };
+ 
+@@ -575,9 +583,12 @@ export const layoutFrameChildren = (
+   }
+ 
+   const contentFrameWidth = contentWidth + padding.horizontal * 2;
+-  // Include title height in the frame height calculation
++  // Title above content, footer reserved band below (16px gap + label + 12px)
+   const contentFrameHeight =
+-    contentHeight + DEFAULT_FRAME_TITLE_HEIGHT + padding.vertical * 2;
++    contentHeight +
++    DEFAULT_FRAME_TITLE_HEIGHT +
++    padding.vertical +
++    SHAPE_FOOTER_RESERVED_HEIGHT;
+ 
+   mutateElement(frame, elementsMap, {
+     width: Math.max(opts.width ?? frame.width, contentFrameWidth),
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 9672aa53a..c0db270fd 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -36,6 +36,7 @@ import {
+   ELEMENT_TRANSLATE_AMOUNT,
+   EVENT,
+   FRAME_STYLE,
++  SHAPE_FOOTER_PADDING,
+   IMAGE_MIME_TYPES,
+   IMAGE_RENDER_TIMEOUT,
+   LINE_CONFIRM_THRESHOLD,
+@@ -2299,6 +2300,99 @@ class App extends React.Component<AppProps, AppState> {
+     });
+   };
+ 
++  private renderShapeFooters() {
++    const renderShapeFooter = this.props.renderShapeFooter;
++    if (!renderShapeFooter) {
++      return null;
++    }
++
++    const scale = this.state.zoom.value;
++    const elementsMap = this.scene.getNonDeletedElementsMap();
++    return this.scene.getNonDeletedElements().map((element) => {
++      if (
++        !(
++          isFrameLikeElement(element) ||
++          element.type === "rectangle" ||
++          element.type === "diamond" ||
++          element.type === "ellipse"
++        )
++      ) {
++        return null;
++      }
++
++      if (
++        !isElementInViewport(
++          element,
++          this.canvas.width / window.devicePixelRatio,
++          this.canvas.height / window.devicePixelRatio,
++          {
++            offsetLeft: this.state.offsetLeft,
++            offsetTop: this.state.offsetTop,
++            scrollX: this.state.scrollX,
++            scrollY: this.state.scrollY,
++            zoom: this.state.zoom,
++          },
++          elementsMap,
++        )
++      ) {
++        return null;
++      }
++
++      const footer = renderShapeFooter(element, this.state);
++      if (footer == null || footer === false) {
++        return null;
++      }
++
++      const { x, y } = sceneCoordsToViewportCoords(
++        { sceneX: element.x, sceneY: element.y },
++        this.state,
++      );
++
++      return (
++        <div
++          key={`shape-footer-${element.id}`}
++          className={CLASSES.SHAPE_FOOTER}
++          style={{
++            position: "absolute",
++            transform: `translate(${x - this.state.offsetLeft}px, ${
++              y - this.state.offsetTop
++            }px) scale(${scale})`,
++            transformOrigin: "top left",
++            pointerEvents: POINTER_EVENTS.disabled,
++            zIndex: 2,
++          }}
++        >
++          <div
++            className={`${CLASSES.SHAPE_FOOTER}__inner`}
++            style={{
++              position: "relative",
++              width: element.width,
++              height: element.height,
++              transform: `rotate(${element.angle}rad)`,
++              overflow: "hidden",
++            }}
++          >
++            <div
++              className={`${CLASSES.SHAPE_FOOTER}__content`}
++              style={{
++                position: "absolute",
++                left: 0,
++                right: 0,
++                bottom: 0,
++                display: "flex",
++                justifyContent: "center",
++                padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px`,
++                boxSizing: "border-box",
++              }}
++            >
++              {footer}
++            </div>
++          </div>
++        </div>
++      );
++    });
++  }
++
+   private toggleOverscrollBehavior(event: React.PointerEvent) {
+     // when pointer inside editor, disable overscroll behavior to prevent
+     // panning to trigger history back/forward on MacOS Chrome
+@@ -2677,6 +2771,7 @@ class App extends React.Component<AppProps, AppState> {
+                               />
+                             )}
+                           {this.renderFrameNames()}
++                          {this.renderShapeFooters()}
+                           {this.isDefaultUIEnabled() &&
+                             this.state.activeLockedId && (
+                               <UnlockPopup
+diff --git a/packages/excalidraw/css/styles.scss b/packages/excalidraw/css/styles.scss
+index 918834ef5..a3d780bed 100644
+--- a/packages/excalidraw/css/styles.scss
++++ b/packages/excalidraw/css/styles.scss
+@@ -912,3 +912,8 @@ body.excalidraw-cursor-resize * {
+     font-family: "Assistant";
+   }
+ }
++
++.excalidraw__shape-footer {
++  pointer-events: none;
++  z-index: 2;
++}
+diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
+index 58c098771..7ba395822 100644
+--- a/packages/excalidraw/index.tsx
++++ b/packages/excalidraw/index.tsx
+@@ -106,6 +106,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+     children,
+     validateEmbeddable,
+     renderEmbeddable,
++    renderShapeFooter,
+     aiEnabled,
+     showDeprecatedFonts,
+     renderScrollbars,
+@@ -244,6 +245,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+           onDuplicate={onDuplicate}
+           validateEmbeddable={validateEmbeddable}
+           renderEmbeddable={renderEmbeddable}
++          renderShapeFooter={renderShapeFooter}
+           aiEnabled={aiEnabled !== false}
+           showDeprecatedFonts={showDeprecatedFonts}
+           renderScrollbars={renderScrollbars}
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index 8f2df4be1..9a3d1e8ab 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -921,6 +921,20 @@ export interface ExcalidrawProps {
+     element: NonDeleted<ExcalidrawEmbeddableElement>,
+     appState: AppState,
+   ) => JSX.Element | null;
++  /**
++   * Render a footer overlay inside a shape or frame (rectangle, diamond,
++   * ellipse, or frame). Return `null` to skip an element.
++   *
++   * Positioned at the bottom-center of the element with 16px top/side and
++   * 12px bottom padding. Children are kept above this footer band.
++   * The overlay scales and rotates with the element.
++   * The wrapper has `pointer-events: none`; set `pointer-events: auto` on
++   * your node if it should be interactive.
++   */
++  renderShapeFooter?: (
++    element: NonDeletedExcalidrawElement,
++    appState: AppState,
++  ) => React.ReactNode;
+   aiEnabled?: boolean;
+   showDeprecatedFonts?: boolean;
+   hideDefaultRotateHandle?: boolean;

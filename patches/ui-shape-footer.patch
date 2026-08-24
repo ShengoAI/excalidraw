@@ -1,16 +1,17 @@
 diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
-index 2ba0fb121..0e1a46e3f 100644
+index 2ba0fb121..bcf94fc0f 100644
 --- a/packages/common/src/constants.ts
 +++ b/packages/common/src/constants.ts
-@@ -106,6 +106,7 @@ export const CLASSES = {
+@@ -106,6 +106,8 @@ export const CLASSES = {
    CONVERT_ELEMENT_TYPE_POPUP: "ConvertElementTypePopup",
    SHAPE_ACTIONS_THEME_SCOPE: "shape-actions-theme-scope",
    FRAME_NAME: "frame-name",
++  SHAPE_CHROME: "excalidraw__shape-chrome",
 +  SHAPE_FOOTER: "excalidraw__shape-footer",
    DROPDOWN_MENU_EVENT_WRAPPER: "dropdown-menu-event-wrapper",
  };
  
-@@ -216,6 +217,21 @@ export const FRAME_TITLE_BLOCK_HEIGHT =
+@@ -216,6 +218,37 @@ export const FRAME_TITLE_BLOCK_HEIGHT =
    FRAME_STYLE.nameInsetY +
    FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight;
  
@@ -29,24 +30,56 @@ index 2ba0fb121..0e1a46e3f 100644
 +  SHAPE_FOOTER_CONTENT_HEIGHT +
 +  SHAPE_FOOTER_PADDING.bottom;
 +
++/** Insets for top-left / top-right chrome (matches the in-frame title). */
++export const SHAPE_TOP_PADDING = {
++  top: 12,
++  horizontal: 16,
++} as const;
++
++/** Gap between a top-left slot and the native frame name. */
++export const SHAPE_TOP_TITLE_GAP = 8;
++
++/** Stacked top-right chrome (e.g. count + collapse icon). */
++export const SHAPE_TOP_CONTENT_MIN_HEIGHT = 36;
++
++/** Space reserved at the top of a frame so children stay below title / top slots. */
++export const SHAPE_TOP_RESERVED_HEIGHT =
++  SHAPE_TOP_PADDING.top + SHAPE_TOP_CONTENT_MIN_HEIGHT;
++
  export const MIN_FONT_SIZE = 1;
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index e33d52961..105609f7f 100644
+index e33d52961..e07e735a2 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,9 @@
 -import { arrayToMap, FRAME_TITLE_BLOCK_HEIGHT } from "@excalidraw/common";
 +import {
 +  arrayToMap,
 +  FRAME_TITLE_BLOCK_HEIGHT,
 +  SHAPE_FOOTER_RESERVED_HEIGHT,
++  SHAPE_TOP_RESERVED_HEIGHT,
 +} from "@excalidraw/common";
  import {
    isPointWithinBounds,
    pointFrom,
-@@ -65,7 +69,11 @@ export const getFittedFrameGeometry = (
+@@ -50,8 +55,12 @@ export const DEFAULT_FRAME_AUTO_LAYOUT_PADDING = 16;
+ export const DEFAULT_FRAME_CONTENT_PADDING_Y = 12;
+ export const DEFAULT_FRAME_AUTO_LAYOUT_GAP = 16;
+ // Title block height (nameInsetY 12 + nameFontSize * nameLineHeight 17.5 = 29.5).
+-// The 12px gap below the title is padding.vertical, not part of this constant.
+-export const DEFAULT_FRAME_TITLE_HEIGHT = FRAME_TITLE_BLOCK_HEIGHT;
++// Raised to SHAPE_TOP_RESERVED_HEIGHT when top-left/top-right chrome is taller
++// (e.g. stacked count + collapse). The 12px gap below is padding.vertical.
++export const DEFAULT_FRAME_TITLE_HEIGHT = Math.max(
++  FRAME_TITLE_BLOCK_HEIGHT,
++  SHAPE_TOP_RESERVED_HEIGHT,
++);
+ 
+ export const getFittedFrameGeometry = (
+   childBounds: readonly [number, number, number, number],
+@@ -65,7 +74,11 @@ export const getFittedFrameGeometry = (
      x: x1 - padX,
      y: y1 - DEFAULT_FRAME_TITLE_HEIGHT - padY,
      width: x2 - x1 + padX * 2,
@@ -59,7 +92,7 @@ index e33d52961..105609f7f 100644
    };
  };
  
-@@ -575,9 +583,12 @@ export const layoutFrameChildren = (
+@@ -575,9 +588,12 @@ export const layoutFrameChildren = (
    }
  
    const contentFrameWidth = contentWidth + padding.horizontal * 2;
@@ -75,24 +108,205 @@ index e33d52961..105609f7f 100644
    mutateElement(frame, elementsMap, {
      width: Math.max(opts.width ?? frame.width, contentFrameWidth),
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 9672aa53a..c0db270fd 100644
+index 9672aa53a..042967d2a 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -36,6 +36,7 @@ import {
+@@ -36,6 +36,9 @@ import {
    ELEMENT_TRANSLATE_AMOUNT,
    EVENT,
    FRAME_STYLE,
 +  SHAPE_FOOTER_PADDING,
++  SHAPE_TOP_PADDING,
++  SHAPE_TOP_TITLE_GAP,
    IMAGE_MIME_TYPES,
    IMAGE_RENDER_TIMEOUT,
    LINE_CONFIRM_THRESHOLD,
-@@ -2299,6 +2300,99 @@ class App extends React.Component<AppProps, AppState> {
+@@ -661,6 +664,16 @@ class App extends React.Component<AppProps, AppState> {
+   public files: BinaryFiles = {};
+   public imageCache: AppClassProperties["imageCache"] = new Map();
+   private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
++  private shapeChromeSlotWidths = new Map<
++    string,
++    { topLeft: number; topRight: number }
++  >();
++  private shapeChromeObservers = new Map<string, ResizeObserver>();
++  private shapeChromeObservedNodes = new Map<string, HTMLDivElement>();
++  private shapeChromeRefCallbacks = new Map<
++    string,
++    (node: HTMLDivElement | null) => void
++  >();
+   /**
+    * Indicates whether the embeddable's url has been validated for rendering.
+    * If value not set, indicates that the validation is pending.
+@@ -2242,6 +2255,9 @@ class App extends React.Component<AppProps, AppState> {
+         frameNameJSX = frameName;
+       }
+ 
++      const { topLeftWidth, topRightWidth, titleGap } =
++        this.getFrameNameChromeOffset(f);
++
+       return (
+         <div
+           id={this.getFrameNameDOMId(f)}
+@@ -2249,7 +2265,8 @@ class App extends React.Component<AppProps, AppState> {
+           key={f.id}
+           style={{
+             position: "absolute",
+-            // Position the frame name inside the frame at top-left
++            // Position the frame name inside the frame at top-left,
++            // shifted right when a top-left chrome slot is present.
+             top: `${
+               y1 +
+               FRAME_STYLE.nameInsetY * this.state.zoom.value -
+@@ -2257,7 +2274,8 @@ class App extends React.Component<AppProps, AppState> {
+             }px`,
+             left: `${
+               x1 +
+-              FRAME_STYLE.nameInsetX * this.state.zoom.value -
++              (FRAME_STYLE.nameInsetX + topLeftWidth + titleGap) *
++                this.state.zoom.value -
+               this.state.offsetLeft
+             }px`,
+             zIndex: 2,
+@@ -2273,7 +2291,11 @@ class App extends React.Component<AppProps, AppState> {
+                 : `${
+                     Math.max(
+                       0,
+-                      f.width - FRAME_STYLE.nameInsetX * 2,
++                      f.width -
++                        FRAME_STYLE.nameInsetX * 2 -
++                        topLeftWidth -
++                        titleGap -
++                        topRightWidth,
+                     ) * this.state.zoom.value
+                   }px`,
+             overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
+@@ -2299,6 +2321,262 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
-+  private renderShapeFooters() {
-+    const renderShapeFooter = this.props.renderShapeFooter;
-+    if (!renderShapeFooter) {
++  private getFrameNameChromeOffset = (frame: ExcalidrawFrameLikeElement) => {
++    const chromeSlots = this.shapeChromeSlotWidths.get(frame.id);
++    const topLeftWidth = chromeSlots?.topLeft ?? 0;
++    const topRightWidth = chromeSlots?.topRight ?? 0;
++    const titleGap = topLeftWidth > 0 ? SHAPE_TOP_TITLE_GAP : 0;
++    return { topLeftWidth, topRightWidth, titleGap };
++  };
++
++  private setShapeChromeSlotWidth = (
++    elementId: string,
++    slot: "topLeft" | "topRight",
++    width: number,
++  ) => {
++    const prev = this.shapeChromeSlotWidths.get(elementId) ?? {
++      topLeft: 0,
++      topRight: 0,
++    };
++    if (prev[slot] === width) {
++      return false;
++    }
++    this.shapeChromeSlotWidths.set(elementId, {
++      ...prev,
++      [slot]: width,
++    });
++    return true;
++  };
++
++  private syncFrameNameChromeOffset = (elementId: string) => {
++    const element = this.scene.getElement(elementId);
++    if (!element || !isFrameLikeElement(element)) {
++      return;
++    }
++    const titleEl = document.getElementById(this.getFrameNameDOMId(element));
++    if (!(titleEl instanceof HTMLElement)) {
++      return;
++    }
++
++    const { topLeftWidth, topRightWidth, titleGap } =
++      this.getFrameNameChromeOffset(element);
++    const { x: x1 } = sceneCoordsToViewportCoords(
++      { sceneX: element.x, sceneY: element.y },
++      this.state,
++    );
++
++    titleEl.style.left = `${
++      x1 +
++      (FRAME_STYLE.nameInsetX + topLeftWidth + titleGap) *
++        this.state.zoom.value -
++      this.state.offsetLeft
++    }px`;
++    titleEl.style.maxWidth = `${
++      Math.max(
++        0,
++        element.width -
++          FRAME_STYLE.nameInsetX * 2 -
++          topLeftWidth -
++          titleGap -
++          topRightWidth,
++      ) * this.state.zoom.value
++    }px`;
++  };
++
++  private applyShapeChromeSlotWidth = (
++    elementId: string,
++    slot: "topLeft" | "topRight",
++    width: number,
++  ) => {
++    if (this.setShapeChromeSlotWidth(elementId, slot, Math.round(width))) {
++      this.syncFrameNameChromeOffset(elementId);
++    }
++  };
++
++  private getShapeChromeSlotRef = (
++    elementId: string,
++    slot: "topLeft" | "topRight",
++  ) => {
++    const observerKey = `${elementId}:${slot}`;
++    let callback = this.shapeChromeRefCallbacks.get(observerKey);
++    if (!callback) {
++      callback = (node) => this.bindShapeChromeSlot(elementId, slot, node);
++      this.shapeChromeRefCallbacks.set(observerKey, callback);
++    }
++    return callback;
++  };
++
++  private bindShapeChromeSlot = (
++    elementId: string,
++    slot: "topLeft" | "topRight",
++    node: HTMLDivElement | null,
++  ) => {
++    const observerKey = `${elementId}:${slot}`;
++
++    if (!node) {
++      this.shapeChromeObservers.get(observerKey)?.disconnect();
++      this.shapeChromeObservers.delete(observerKey);
++      this.shapeChromeObservedNodes.delete(observerKey);
++      this.applyShapeChromeSlotWidth(elementId, slot, 0);
++      return;
++    }
++
++    if (this.shapeChromeObservedNodes.get(observerKey) === node) {
++      return;
++    }
++
++    this.shapeChromeObservers.get(observerKey)?.disconnect();
++    this.shapeChromeObservers.delete(observerKey);
++    this.shapeChromeObservedNodes.set(observerKey, node);
++    this.applyShapeChromeSlotWidth(elementId, slot, node.offsetWidth);
++
++    if (supportsResizeObserver) {
++      const observer = new ResizeObserver(() => {
++        this.applyShapeChromeSlotWidth(elementId, slot, node.offsetWidth);
++      });
++      observer.observe(node);
++      this.shapeChromeObservers.set(observerKey, observer);
++    }
++  };
++
++  private renderShapeChrome() {
++    const { renderShapeFooter, renderShapeTopLeft, renderShapeTopRight } =
++      this.props;
++    if (!renderShapeFooter && !renderShapeTopLeft && !renderShapeTopRight) {
 +      return null;
 +    }
 +
@@ -128,8 +342,13 @@ index 9672aa53a..c0db270fd 100644
 +        return null;
 +      }
 +
-+      const footer = renderShapeFooter(element, this.state);
-+      if (footer == null || footer === false) {
++      const footer = renderShapeFooter?.(element, this.state);
++      const topLeft = renderShapeTopLeft?.(element, this.state);
++      const topRight = renderShapeTopRight?.(element, this.state);
++      const hasFooter = footer != null && footer !== false;
++      const hasTopLeft = topLeft != null && topLeft !== false;
++      const hasTopRight = topRight != null && topRight !== false;
++      if (!hasFooter && !hasTopLeft && !hasTopRight) {
 +        return null;
 +      }
 +
@@ -140,8 +359,8 @@ index 9672aa53a..c0db270fd 100644
 +
 +      return (
 +        <div
-+          key={`shape-footer-${element.id}`}
-+          className={CLASSES.SHAPE_FOOTER}
++          key={`shape-chrome-${element.id}`}
++          className={CLASSES.SHAPE_CHROME}
 +          style={{
 +            position: "absolute",
 +            transform: `translate(${x - this.state.offsetLeft}px, ${
@@ -149,11 +368,11 @@ index 9672aa53a..c0db270fd 100644
 +            }px) scale(${scale})`,
 +            transformOrigin: "top left",
 +            pointerEvents: POINTER_EVENTS.disabled,
-+            zIndex: 2,
++            zIndex: 3,
 +          }}
 +        >
 +          <div
-+            className={`${CLASSES.SHAPE_FOOTER}__inner`}
++            className={`${CLASSES.SHAPE_CHROME}__inner`}
 +            style={{
 +              position: "relative",
 +              width: element.width,
@@ -162,21 +381,60 @@ index 9672aa53a..c0db270fd 100644
 +              overflow: "hidden",
 +            }}
 +          >
-+            <div
-+              className={`${CLASSES.SHAPE_FOOTER}__content`}
-+              style={{
-+                position: "absolute",
-+                left: 0,
-+                right: 0,
-+                bottom: 0,
-+                display: "flex",
-+                justifyContent: "center",
-+                padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px`,
-+                boxSizing: "border-box",
-+              }}
-+            >
-+              {footer}
-+            </div>
++            {hasTopLeft && (
++              <div
++                className={`${CLASSES.SHAPE_CHROME}__top-left`}
++                style={{
++                  position: "absolute",
++                  top: 0,
++                  left: 0,
++                  padding: `${SHAPE_TOP_PADDING.top}px 0 0 ${SHAPE_TOP_PADDING.horizontal}px`,
++                  boxSizing: "border-box",
++                  display: "flex",
++                  alignItems: "flex-start",
++                }}
++              >
++                <div ref={this.getShapeChromeSlotRef(element.id, "topLeft")}>
++                  {topLeft}
++                </div>
++              </div>
++            )}
++            {hasTopRight && (
++              <div
++                className={`${CLASSES.SHAPE_CHROME}__top-right`}
++                style={{
++                  position: "absolute",
++                  top: 0,
++                  right: 0,
++                  padding: `${SHAPE_TOP_PADDING.top}px ${SHAPE_TOP_PADDING.horizontal}px 0 0`,
++                  boxSizing: "border-box",
++                  display: "flex",
++                  alignItems: "flex-start",
++                  justifyContent: "flex-end",
++                }}
++              >
++                <div ref={this.getShapeChromeSlotRef(element.id, "topRight")}>
++                  {topRight}
++                </div>
++              </div>
++            )}
++            {hasFooter && (
++              <div
++                className={`${CLASSES.SHAPE_FOOTER} ${CLASSES.SHAPE_FOOTER}__content`}
++                style={{
++                  position: "absolute",
++                  left: 0,
++                  right: 0,
++                  bottom: 0,
++                  display: "flex",
++                  justifyContent: "center",
++                  padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px`,
++                  boxSizing: "border-box",
++                }}
++              >
++                {footer}
++              </div>
++            )}
 +          </div>
 +        </div>
 +      );
@@ -186,52 +444,57 @@ index 9672aa53a..c0db270fd 100644
    private toggleOverscrollBehavior(event: React.PointerEvent) {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2677,6 +2771,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2677,6 +2955,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}
-+                          {this.renderShapeFooters()}
++                          {this.renderShapeChrome()}
                            {this.isDefaultUIEnabled() &&
                              this.state.activeLockedId && (
                                <UnlockPopup
 diff --git a/packages/excalidraw/css/styles.scss b/packages/excalidraw/css/styles.scss
-index 918834ef5..a3d780bed 100644
+index 918834ef5..500533edc 100644
 --- a/packages/excalidraw/css/styles.scss
 +++ b/packages/excalidraw/css/styles.scss
-@@ -912,3 +912,8 @@ body.excalidraw-cursor-resize * {
+@@ -912,3 +912,9 @@ body.excalidraw-cursor-resize * {
      font-family: "Assistant";
    }
  }
 +
++.excalidraw__shape-chrome,
 +.excalidraw__shape-footer {
 +  pointer-events: none;
 +  z-index: 2;
 +}
 diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
-index 58c098771..7ba395822 100644
+index 58c098771..acb6d6edf 100644
 --- a/packages/excalidraw/index.tsx
 +++ b/packages/excalidraw/index.tsx
-@@ -106,6 +106,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+@@ -106,6 +106,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
      children,
      validateEmbeddable,
      renderEmbeddable,
 +    renderShapeFooter,
++    renderShapeTopLeft,
++    renderShapeTopRight,
      aiEnabled,
      showDeprecatedFonts,
      renderScrollbars,
-@@ -244,6 +245,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+@@ -244,6 +247,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
            onDuplicate={onDuplicate}
            validateEmbeddable={validateEmbeddable}
            renderEmbeddable={renderEmbeddable}
 +          renderShapeFooter={renderShapeFooter}
++          renderShapeTopLeft={renderShapeTopLeft}
++          renderShapeTopRight={renderShapeTopRight}
            aiEnabled={aiEnabled !== false}
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 8f2df4be1..9a3d1e8ab 100644
+index 8f2df4be1..09a4e3203 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -921,6 +921,20 @@ export interface ExcalidrawProps {
+@@ -921,6 +921,45 @@ export interface ExcalidrawProps {
      element: NonDeleted<ExcalidrawEmbeddableElement>,
      appState: AppState,
    ) => JSX.Element | null;
@@ -246,6 +509,31 @@ index 8f2df4be1..9a3d1e8ab 100644
 +   * your node if it should be interactive.
 +   */
 +  renderShapeFooter?: (
++    element: NonDeletedExcalidrawElement,
++    appState: AppState,
++  ) => React.ReactNode;
++  /**
++   * Render a top-left overlay inside a shape or frame. Return `null` to skip.
++   *
++   * Positioned at the top-left with 16px side and 12px top padding (same as
++   * the in-frame title). When present on a frame, the native name shifts
++   * right to sit beside this node.
++   * The wrapper has `pointer-events: none`; set `pointer-events: auto` on
++   * your node if it should be interactive.
++   */
++  renderShapeTopLeft?: (
++    element: NonDeletedExcalidrawElement,
++    appState: AppState,
++  ) => React.ReactNode;
++  /**
++   * Render a top-right overlay inside a shape or frame. Return `null` to skip.
++   *
++   * Positioned at the top-right with 16px side and 12px top padding.
++   * Frame children are kept below this header band.
++   * The wrapper has `pointer-events: none`; set `pointer-events: auto` on
++   * your node if it should be interactive.
++   */
++  renderShapeTopRight?: (
 +    element: NonDeletedExcalidrawElement,
 +    appState: AppState,
 +  ) => React.ReactNode;

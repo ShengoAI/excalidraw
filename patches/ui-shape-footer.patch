@@ -50,7 +50,7 @@ index 2ba0fb121..bcf94fc0f 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index e6dfd61f9..6770987de 100644
+index 04cce80d0..037145d35 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -2,6 +2,8 @@ import {
@@ -91,9 +91,9 @@ index e6dfd61f9..6770987de 100644
 +  return Math.max(titleHeight, SHAPE_TOP_RESERVED_HEIGHT);
 +};
  
- export const getFittedFrameGeometry = (
-   childBounds: readonly [number, number, number, number],
-@@ -170,7 +179,11 @@ export const getFittedFrameGeometry = (
+ export const isFrameCollapsed = (
+   frame?: Pick<ExcalidrawFrameLikeElement, "collapsed"> | null,
+@@ -178,7 +187,11 @@ export const getFittedFrameGeometry = (
      x: x1 - padX,
      y: y1 - titleHeight - padY,
      width: x2 - x1 + padX * 2,
@@ -106,7 +106,7 @@ index e6dfd61f9..6770987de 100644
    };
  };
  
-@@ -712,7 +725,7 @@ export const layoutFrameChildren = (
+@@ -720,7 +733,7 @@ export const layoutFrameChildren = (
    }
  
    const titleHeight = getFrameTitleReservedHeight(frame);
@@ -115,8 +115,21 @@ index e6dfd61f9..6770987de 100644
    const contentFrameWidth = contentWidth + padding.horizontal * 2;
    const contentFrameHeight =
      contentHeight + titleHeight + padding.vertical + bottomReserve;
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+index 6955f02af..50e90e991 100644
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -273,7 +273,7 @@ export const newMagicFrameElement = (
+   );
+ 
+   return frameElement;
+-}
++};
+ 
+ /** computes element x/y offset based on textAlign/verticalAlign */
+ const getTextElementPositionOffsets = (
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index d89b7df72..6d5ad2110 100644
+index eb6e3a21e..951d9b0b5 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -138,7 +151,7 @@ index d89b7df72..6d5ad2110 100644
    elementOverlapsWithFrame,
    updateFrameMembershipOfSelectedElements,
    isElementInFrame,
-@@ -666,6 +671,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -667,6 +672,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -155,7 +168,7 @@ index d89b7df72..6d5ad2110 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2181,17 +2196,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2183,17 +2198,12 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -179,7 +192,7 @@ index d89b7df72..6d5ad2110 100644
        );
  
        const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2262,7 +2272,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2264,7 +2274,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -189,7 +202,7 @@ index d89b7df72..6d5ad2110 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2278,7 +2289,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2280,7 +2291,11 @@ class App extends React.Component<AppProps, AppState> {
                  : `${
                      Math.max(
                        0,
@@ -202,7 +215,7 @@ index d89b7df72..6d5ad2110 100644
                      ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2304,6 +2319,331 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2306,6 +2321,332 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -346,16 +359,13 @@ index d89b7df72..6d5ad2110 100644
 +    element: ExcalidrawElement,
 +    elementsMap: NonDeletedSceneElementsMap,
 +  ): string[] {
-+    if (!this.state.frameRendering.enabled || !this.state.frameRendering.clip) {
++    if (!this.state.frameRendering.enabled) {
 +      return [];
 +    }
 +
 +    const clipPaths: string[] = [];
 +    for (const frame of [...getAncestorFrames(element, elementsMap)].reverse()) {
-+      if (
-+        frame.clip === false ||
-+        !shouldApplyFrameClip(element, frame, this.state, elementsMap)
-+      ) {
++      if (!shouldApplyFrameClip(element, frame, this.state, elementsMap)) {
 +        continue;
 +      }
 +
@@ -421,7 +431,9 @@ index d89b7df72..6d5ad2110 100644
 +      const footer = renderShapeFooter?.(element, this.state);
 +      const topLeft = renderShapeTopLeft?.(element, this.state);
 +      const topRight = renderShapeTopRight?.(element, this.state);
-+      const hasFooter = footer != null && footer !== false;
++      const hideFooter =
++        isFrameLikeElement(element) && Boolean(element.collapsed);
++      const hasFooter = !hideFooter && footer != null && footer !== false;
 +      const hasTopLeft = topLeft != null && topLeft !== false;
 +      const hasTopRight = topRight != null && topRight !== false;
 +      if (!hasFooter && !hasTopLeft && !hasTopRight) {
@@ -455,6 +467,7 @@ index d89b7df72..6d5ad2110 100644
 +                boxSizing: "border-box",
 +                display: "flex",
 +                alignItems: "flex-start",
++                pointerEvents: POINTER_EVENTS.enabled,
 +              }}
 +            >
 +              <div ref={this.getShapeChromeSlotRef(element.id, "topLeft")}>
@@ -474,6 +487,7 @@ index d89b7df72..6d5ad2110 100644
 +                display: "flex",
 +                alignItems: "flex-start",
 +                justifyContent: "flex-end",
++                pointerEvents: POINTER_EVENTS.enabled,
 +              }}
 +            >
 +              <div ref={this.getShapeChromeSlotRef(element.id, "topRight")}>
@@ -534,7 +548,7 @@ index d89b7df72..6d5ad2110 100644
    private toggleOverscrollBehavior(event: React.PointerEvent) {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2682,6 +3022,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2684,6 +3025,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}
@@ -581,7 +595,7 @@ index 58c098771..acb6d6edf 100644
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 1148988ca..1dc990280 100644
+index 31bf52f3d..2edfb1c5a 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
 @@ -37,6 +37,8 @@ import type {
@@ -650,3 +664,12 @@ index 1148988ca..1dc990280 100644
    aiEnabled?: boolean;
    showDeprecatedFonts?: boolean;
    hideDefaultRotateHandle?: boolean;
+@@ -1343,7 +1380,7 @@ export interface ExcalidrawImperativeAPI {
+     clip?: boolean,
+   ) => boolean;
+   /**
+-   * Collapses a frame to its title/top chrome header, or expands it back.
++   * Collapses a frame to its title/top-chrome header, or expands it back.
+    * Children stay members and are clipped while collapsed.
+    * @param frameId - The ID of the frame to update
+    * @param collapsed - Optional explicit value. If not provided, toggles.

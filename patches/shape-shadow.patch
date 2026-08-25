@@ -229,8 +229,9 @@ index fff306d..da73508 100644
    NonDeletedSceneElementsMap,
  } from "@excalidraw/element/types";
  
-@@ -1221,12 +1222,18 @@ export type FrameLayoutSettings = {
+@@ -1221,13 +1222,19 @@ export type FrameLayoutSettings = {
    clip: boolean;
+   collapsed: boolean;
  };
  
 +export type ElementShadowOptions = null | Partial<ElementShadow>;

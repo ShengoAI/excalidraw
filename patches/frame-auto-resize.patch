@@ -90,7 +90,7 @@ index 287fdf2df..a322a6628 100644
  
    const origElements: ExcalidrawElement[] = [];
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf285..c23ba4409 100644
+index bc2cdf285..8177bdcf0 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -1,4 +1,8 @@
@@ -103,13 +103,95 @@ index bc2cdf285..c23ba4409 100644
  import {
    isPointWithinBounds,
    pointFrom,
-@@ -46,6 +50,52 @@ import type {
+@@ -42,10 +46,134 @@ import type {
+   ElementsMapOrArray,
+   ExcalidrawElement,
+   ExcalidrawFrameLikeElement,
++  FrameAutoLayoutAlign,
++  FrameAutoLayoutHug,
+   NonDeleted,
    NonDeletedExcalidrawElement,
  } from "./types";
  
 +export const DEFAULT_FRAME_AUTO_LAYOUT_PADDING = 16;
 +export const DEFAULT_FRAME_CONTENT_PADDING_Y = 12;
 +export const DEFAULT_FRAME_AUTO_LAYOUT_GAP = 16;
++export const DEFAULT_FRAME_AUTO_LAYOUT_HUG: FrameAutoLayoutHug = {
++  horizontal: true,
++  vertical: true,
++};
++export const DEFAULT_FRAME_AUTO_LAYOUT_ALIGN: FrameAutoLayoutAlign =
++  "top-left";
++
++export const FRAME_AUTO_LAYOUT_ALIGNS = [
++  "top-left",
++  "top-center",
++  "top-right",
++  "center-left",
++  "center",
++  "center-right",
++  "bottom-left",
++  "bottom-center",
++  "bottom-right",
++] as const;
++
++const ALIGN_AXES: Record<
++  FrameAutoLayoutAlign,
++  { horizontal: "start" | "center" | "end"; vertical: "start" | "center" | "end" }
++> = {
++  "top-left": { horizontal: "start", vertical: "start" },
++  "top-center": { horizontal: "center", vertical: "start" },
++  "top-right": { horizontal: "end", vertical: "start" },
++  "center-left": { horizontal: "start", vertical: "center" },
++  center: { horizontal: "center", vertical: "center" },
++  "center-right": { horizontal: "end", vertical: "center" },
++  "bottom-left": { horizontal: "start", vertical: "end" },
++  "bottom-center": { horizontal: "center", vertical: "end" },
++  "bottom-right": { horizontal: "end", vertical: "end" },
++};
++
++export const getFrameAutoLayoutHug = (
++  frame?: Pick<ExcalidrawFrameLikeElement, "autoLayoutHug"> | null,
++): FrameAutoLayoutHug => ({
++  horizontal: frame?.autoLayoutHug?.horizontal ?? true,
++  vertical: frame?.autoLayoutHug?.vertical ?? true,
++});
++
++export const getFrameAutoLayoutAlign = (
++  frame?: Pick<ExcalidrawFrameLikeElement, "autoLayoutAlign"> | null,
++): FrameAutoLayoutAlign => frame?.autoLayoutAlign ?? "top-left";
++
++export const normalizeFrameAutoLayoutHug = (
++  value: boolean | Partial<FrameAutoLayoutHug> | undefined,
++  fallback: FrameAutoLayoutHug = DEFAULT_FRAME_AUTO_LAYOUT_HUG,
++): FrameAutoLayoutHug => {
++  if (value === undefined) {
++    return fallback;
++  }
++  if (typeof value === "boolean") {
++    return { horizontal: value, vertical: value };
++  }
++  return {
++    horizontal: value.horizontal ?? fallback.horizontal,
++    vertical: value.vertical ?? fallback.vertical,
++  };
++};
++
++const alignmentOffset = (
++  align: "start" | "center" | "end",
++  extra: number,
++) => {
++  if (extra <= 0) {
++    return 0;
++  }
++  if (align === "center") {
++    return extra / 2;
++  }
++  if (align === "end") {
++    return extra;
++  }
++  return 0;
++};
 +// Title block height (nameInsetY 12 + nameFontSize * nameLineHeight 17.5 = 29.5).
 +// The 12px gap below the title is padding.vertical, not part of this constant.
 +export const DEFAULT_FRAME_TITLE_HEIGHT = FRAME_TITLE_BLOCK_HEIGHT;
@@ -156,7 +238,7 @@ index bc2cdf285..c23ba4409 100644
  // --------------------------- Frame State ------------------------------------
  export const bindElementsToFramesAfterDuplication = (
    nextElements: readonly ExcalidrawElement[],
-@@ -95,11 +145,11 @@ export const getElementsCompletelyInFrame = (
+@@ -95,11 +223,11 @@ export const getElementsCompletelyInFrame = (
    frame: ExcalidrawFrameLikeElement,
    elementsMap: ElementsMap,
  ) =>
@@ -172,7 +254,7 @@ index bc2cdf285..c23ba4409 100644
        element.frameId === frame.id,
    );
  
-@@ -444,6 +494,145 @@ export const getContainingFrame = (
+@@ -444,6 +572,198 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -209,6 +291,8 @@ index bc2cdf285..c23ba4409 100644
 +    height?: number;
 +    padding?: Partial<{ horizontal: number; vertical: number }>;
 +    gap?: number;
++    hug?: FrameAutoLayoutHug;
++    align?: FrameAutoLayoutAlign;
 +  } = {},
 +): boolean => {
 +  if (!direction) {
@@ -227,6 +311,9 @@ index bc2cdf285..c23ba4409 100644
 +  };
 +  const gap =
 +    opts.gap ?? frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
++  const hug = opts.hug ?? getFrameAutoLayoutHug(frame);
++  const align = opts.align ?? getFrameAutoLayoutAlign(frame);
++  const axes = ALIGN_AXES[align] ?? ALIGN_AXES["top-left"];
 +
 +  const elementsMap = arrayToMap(allElements);
 +  const elements = Array.isArray(allElements)
@@ -245,17 +332,75 @@ index bc2cdf285..c23ba4409 100644
 +    return false;
 +  }
 +
-+  let cursorX = frame.x + padding.horizontal;
-+  const titleHeight = getFrameTitleReservedHeight(frame);
-+  // Add title height offset so children start below the frame title
-+  let cursorY = frame.y + titleHeight + padding.vertical;
++  const childMetrics = children.map((child) => {
++    const [x1, y1, x2, y2] = getElementAbsoluteCoords(child, elementsMap);
++    return {
++      child,
++      x1,
++      y1,
++      width: x2 - x1,
++      height: y2 - y1,
++    };
++  });
++
 +  let contentWidth = 0;
 +  let contentHeight = 0;
++  for (const metric of childMetrics) {
++    if (direction === "vertical") {
++      contentHeight += metric.height + (contentHeight ? gap : 0);
++      contentWidth = Math.max(contentWidth, metric.width);
++    } else {
++      contentWidth += metric.width + (contentWidth ? gap : 0);
++      contentHeight = Math.max(contentHeight, metric.height);
++    }
++  }
 +
-+  for (const child of children) {
-+    const [x1, y1, x2, y2] = getElementAbsoluteCoords(child, elementsMap);
-+    const deltaX = cursorX - x1;
-+    const deltaY = cursorY - y1;
++  const titleHeight = getFrameTitleReservedHeight(frame);
++  const bottomReserve = padding.vertical;
++  const contentFrameWidth = contentWidth + padding.horizontal * 2;
++  const contentFrameHeight =
++    contentHeight + titleHeight + padding.vertical + bottomReserve;
++
++  const nextWidth = hug.horizontal
++    ? contentFrameWidth
++    : opts.width ?? frame.width;
++  const nextHeight = hug.vertical
++    ? contentFrameHeight
++    : opts.height ?? frame.height;
++
++  const innerWidth = Math.max(0, nextWidth - padding.horizontal * 2);
++  const innerHeight = Math.max(
++    0,
++    nextHeight - titleHeight - padding.vertical - bottomReserve,
++  );
++  const extraW = innerWidth - contentWidth;
++  const extraH = innerHeight - contentHeight;
++
++  let cursorX = frame.x + padding.horizontal;
++  let cursorY = frame.y + titleHeight + padding.vertical;
++  if (direction === "vertical") {
++    cursorY += alignmentOffset(axes.vertical, extraH);
++  } else {
++    cursorX += alignmentOffset(axes.horizontal, extraW);
++  }
++
++  for (const metric of childMetrics) {
++    const { child } = metric;
++    const targetX1 =
++      direction === "vertical"
++        ? frame.x +
++          padding.horizontal +
++          alignmentOffset(axes.horizontal, innerWidth - metric.width)
++        : cursorX;
++    const targetY1 =
++      direction === "horizontal"
++        ? frame.y +
++          titleHeight +
++          padding.vertical +
++          alignmentOffset(axes.vertical, innerHeight - metric.height)
++        : cursorY;
++    const deltaX = targetX1 - metric.x1;
++    const deltaY = targetY1 - metric.y1;
 +
 +    mutateElement(child, elementsMap, {
 +      x: child.x + deltaX,
@@ -270,30 +415,20 @@ index bc2cdf285..c23ba4409 100644
 +      });
 +    }
 +
-+    const childWidth = x2 - x1;
-+    const childHeight = y2 - y1;
-+
 +    if (direction === "vertical") {
-+      cursorY += childHeight + gap;
-+      contentHeight += childHeight + (contentHeight ? gap : 0);
-+      contentWidth = Math.max(contentWidth, childWidth);
++      cursorY += metric.height + gap;
 +    } else {
-+      cursorX += childWidth + gap;
-+      contentWidth += childWidth + (contentWidth ? gap : 0);
-+      contentHeight = Math.max(contentHeight, childHeight);
++      cursorX += metric.width + gap;
 +    }
 +  }
 +
-+  const contentFrameWidth = contentWidth + padding.horizontal * 2;
-+  // Include title height in the frame height calculation
-+  const contentFrameHeight =
-+    contentHeight + titleHeight + padding.vertical * 2;
-+
 +  mutateElement(frame, elementsMap, {
-+    width: Math.max(opts.width ?? frame.width, contentFrameWidth),
-+    height: Math.max(opts.height ?? frame.height, contentFrameHeight),
++    width: nextWidth,
++    height: nextHeight,
 +    autoLayoutPadding: padding,
 +    autoLayoutGap: gap,
++    autoLayoutHug: hug,
++    autoLayoutAlign: align,
 +  });
 +
 +  return true;
@@ -318,7 +453,7 @@ index bc2cdf285..c23ba4409 100644
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +655,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +786,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -337,7 +472,7 @@ index bc2cdf285..c23ba4409 100644
        continue;
      }
  
-@@ -521,7 +712,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+@@ -521,7 +843,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
  export const getFrameChildrenInsertionIndex = (
    elements: readonly ExcalidrawElement[],
    frameId: ExcalidrawFrameLikeElement["id"],
@@ -361,7 +496,7 @@ index bc2cdf285..c23ba4409 100644
    for (let index = elements.length - 1; index >= 0; index--) {
      const element = elements[index];
  
-@@ -566,11 +773,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +904,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -380,7 +515,7 @@ index bc2cdf285..c23ba4409 100644
        continue;
      }
  
-@@ -610,9 +819,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -610,9 +950,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
    const otherElements = Array.from(allElements.values()).filter(
      (element) => !finalElementsToAdd.has(element),
    );
@@ -394,7 +529,7 @@ index bc2cdf285..c23ba4409 100644
    );
  
    if (insertionIndex === null) {
-@@ -725,9 +938,9 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,9 +1069,9 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -405,7 +540,7 @@ index bc2cdf285..c23ba4409 100644
        !isElementInFrame(element, elementsMap, appState)
      ) {
        elementsToRemove.add(element);
-@@ -919,6 +1132,11 @@ export const shouldApplyFrameClip = (
+@@ -919,6 +1263,11 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -417,7 +552,7 @@ index bc2cdf285..c23ba4409 100644
    // for individual elements, only clip when the element is
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
-@@ -968,7 +1186,7 @@ export const shouldApplyFrameClip = (
+@@ -968,7 +1317,7 @@ export const shouldApplyFrameClip = (
    return false;
  };
  
@@ -427,7 +562,7 @@ index bc2cdf285..c23ba4409 100644
  
  export const getDefaultFrameName = (element: ExcalidrawFrameLikeElement) => {
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index d1c2139db..9eb987e73 100644
+index d1c2139db..a09a647d6 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -5,6 +5,7 @@ import {
@@ -438,7 +573,15 @@ index d1c2139db..9eb987e73 100644
    VERTICAL_ALIGN,
    randomInteger,
    randomId,
-@@ -187,6 +188,12 @@ export const newIframeElement = (
+@@ -49,6 +50,7 @@ import type {
+   ExcalidrawArrowElement,
+   ExcalidrawElbowArrowElement,
+   ExcalidrawLineElement,
++  FrameAutoLayoutAlign,
+ } from "./types";
+ 
+ export type ElementConstructorOpts = MarkOptional<
+@@ -187,6 +189,14 @@ export const newIframeElement = (
  export const newFrameElement = (
    opts: {
      name?: string;
@@ -446,12 +589,14 @@ index d1c2139db..9eb987e73 100644
 +    autoLayout?: "vertical" | "horizontal" | null;
 +    autoLayoutPadding?: { horizontal: number; vertical: number };
 +    autoLayoutGap?: number;
++    autoLayoutHug?: { horizontal: boolean; vertical: boolean };
++    autoLayoutAlign?: FrameAutoLayoutAlign;
 +    fontSize?: number;
 +    nameColor?: string | null;
    } & ElementConstructorOpts,
  ): NonDeleted<ExcalidrawFrameElement> => {
    const frameElement = newElementWith(
-@@ -194,6 +201,15 @@ export const newFrameElement = (
+@@ -194,6 +204,20 @@ export const newFrameElement = (
        ..._newElementBase<ExcalidrawFrameElement>("frame", opts),
        type: "frame",
        name: opts?.name || null,
@@ -462,12 +607,17 @@ index d1c2139db..9eb987e73 100644
 +        vertical: 12,
 +      },
 +      autoLayoutGap: opts?.autoLayoutGap ?? 16,
++      autoLayoutHug: opts?.autoLayoutHug ?? {
++        horizontal: true,
++        vertical: true,
++      },
++      autoLayoutAlign: opts?.autoLayoutAlign ?? "top-left",
 +      fontSize: opts?.fontSize ?? FRAME_STYLE.nameFontSize,
 +      nameColor: opts?.nameColor ?? null,
      },
      {},
    );
-@@ -204,6 +220,12 @@ export const newFrameElement = (
+@@ -204,6 +228,14 @@ export const newFrameElement = (
  export const newMagicFrameElement = (
    opts: {
      name?: string;
@@ -475,12 +625,14 @@ index d1c2139db..9eb987e73 100644
 +    autoLayout?: "vertical" | "horizontal" | null;
 +    autoLayoutPadding?: { horizontal: number; vertical: number };
 +    autoLayoutGap?: number;
++    autoLayoutHug?: { horizontal: boolean; vertical: boolean };
++    autoLayoutAlign?: FrameAutoLayoutAlign;
 +    fontSize?: number;
 +    nameColor?: string | null;
    } & ElementConstructorOpts,
  ): NonDeleted<ExcalidrawMagicFrameElement> => {
    const frameElement = newElementWith(
-@@ -211,6 +233,15 @@ export const newMagicFrameElement = (
+@@ -211,6 +243,20 @@ export const newMagicFrameElement = (
        ..._newElementBase<ExcalidrawMagicFrameElement>("magicframe", opts),
        type: "magicframe",
        name: opts?.name || null,
@@ -491,6 +643,11 @@ index d1c2139db..9eb987e73 100644
 +        vertical: 12,
 +      },
 +      autoLayoutGap: opts?.autoLayoutGap ?? 16,
++      autoLayoutHug: opts?.autoLayoutHug ?? {
++        horizontal: true,
++        vertical: true,
++      },
++      autoLayoutAlign: opts?.autoLayoutAlign ?? "top-left",
 +      fontSize: opts?.fontSize ?? FRAME_STYLE.nameFontSize,
 +      nameColor: opts?.nameColor ?? null,
      },
@@ -569,18 +726,10 @@ index 22c3ed494..6d77a9db3 100644
  
          if (FRAME_STYLE.radius && context.roundRect) {
 diff --git a/packages/element/src/resizeElements.ts b/packages/element/src/resizeElements.ts
-index 9915df266..f77175459 100644
+index 9915df266..04a9bd4c6 100644
 --- a/packages/element/src/resizeElements.ts
 +++ b/packages/element/src/resizeElements.ts
-@@ -53,7 +53,6 @@ import {
-   isBindingElement,
-   isBoundToContainer,
-   isElbowArrow,
--  isFrameLikeElement,
-   isFreeDrawElement,
-   isImageElement,
-   isLinearElement,
-@@ -61,6 +60,7 @@ import {
+@@ -61,6 +61,7 @@ import {
  } from "./typeChecks";
  
  import { isInGroup } from "./groups";
@@ -588,7 +737,7 @@ index 9915df266..f77175459 100644
  
  import type { Scene } from "./Scene";
  
-@@ -98,10 +98,23 @@ export const transformElements = (
+@@ -98,10 +99,23 @@ export const transformElements = (
    centerY: number,
  ): boolean => {
    const elementsMap = scene.getNonDeletedElementsMap();
@@ -615,7 +764,7 @@ index 9915df266..f77175459 100644
          rotateSingleElement(
            element,
            scene,
-@@ -109,9 +122,43 @@ export const transformElements = (
+@@ -109,9 +123,43 @@ export const transformElements = (
            pointerY,
            shouldRotateWithDiscreteAngle,
          );
@@ -630,12 +779,12 @@ index 9915df266..f77175459 100644
 +            latest.y + latest.height / 2,
 +          );
 +        }
++        updateBoundElements(element, scene);
++      }
++      if (isTextElement(element)) {
          updateBoundElements(element, scene);
        }
 -    } else if (transformHandleType) {
-+      if (isTextElement(element)) {
-+        updateBoundElements(element, scene);
-+      }
 +      return true;
 +    }
 +
@@ -660,7 +809,7 @@ index 9915df266..f77175459 100644
        const elementId = selectedElements[0].id;
        const latestElement = elementsMap.get(elementId);
        const origElement = originalElements.get(elementId);
-@@ -150,19 +197,7 @@ export const transformElements = (
+@@ -150,19 +198,7 @@ export const transformElements = (
      }
      return true;
    } else if (selectedElements.length > 1) {
@@ -681,7 +830,7 @@ index 9915df266..f77175459 100644
        const { nextWidth, nextHeight, flipByX, flipByY, originalBoundingBox } =
          getNextMultipleWidthAndHeightFromPointer(
            selectedElements,
-@@ -213,18 +248,13 @@ const rotateSingleElement = (
+@@ -213,18 +249,13 @@ const rotateSingleElement = (
    );
    const cx = (x1 + x2) / 2;
    const cy = (y1 + y2) / 2;
@@ -706,7 +855,7 @@ index 9915df266..f77175459 100644
    const boundTextElementId = getBoundTextElementId(element);
  
    let update: ElementUpdate<NonDeletedExcalidrawElement> = {
-@@ -425,8 +455,7 @@ const rotateMultipleElements = (
+@@ -425,8 +456,7 @@ const rotateMultipleElements = (
    >(elements.map((element) => [element.id, element]));
  
    for (const element of elements) {
@@ -716,7 +865,7 @@ index 9915df266..f77175459 100644
        const cx = (x1 + x2) / 2;
        const cy = (y1 + y2) / 2;
        const origAngle =
-@@ -468,7 +497,11 @@ const rotateMultipleElements = (
+@@ -468,7 +498,11 @@ const rotateMultipleElements = (
        }
  
        const boundText = getBoundTextElement(element, elementsMap);
@@ -729,7 +878,7 @@ index 9915df266..f77175459 100644
          const { x, y } = computeBoundTextPosition(
            element,
            boundText,
-@@ -481,12 +514,73 @@ const rotateMultipleElements = (
+@@ -481,12 +515,73 @@ const rotateMultipleElements = (
            angle: normalizeRadians((centerAngle + origAngle) as Radians),
          });
        }
@@ -804,6 +953,32 @@ index 9915df266..f77175459 100644
  export const getResizeOffsetXY = (
    transformHandleType: MaybeTransformHandleType,
    selectedElements: NonDeletedExcalidrawElement[],
+@@ -909,6 +1004,25 @@ export const resizeSingleElement = (
+       isDragging: false,
+     });
+ 
++    if (isFrameLikeElement(latestElement)) {
++      const hug = latestElement.autoLayoutHug ?? {
++        horizontal: true,
++        vertical: true,
++      };
++      const nextHug = {
++        horizontal:
++          Math.abs(nextWidth) !== origElement.width ? false : hug.horizontal,
++        vertical:
++          Math.abs(nextHeight) !== origElement.height ? false : hug.vertical,
++      };
++      if (
++        nextHug.horizontal !== hug.horizontal ||
++        nextHug.vertical !== hug.vertical
++      ) {
++        scene.mutateElement(latestElement, { autoLayoutHug: nextHug });
++      }
++    }
++
+     if (boundTextElement && boundTextFont != null) {
+       scene.mutateElement(boundTextElement, {
+         fontSize: boundTextFont.fontSize,
 diff --git a/packages/element/src/transformHandles.ts b/packages/element/src/transformHandles.ts
 index 7ef56849c..723bb93ec 100644
 --- a/packages/element/src/transformHandles.ts
@@ -837,10 +1012,29 @@ index 7ef56849c..723bb93ec 100644
    const margin = isLinearElement(element)
      ? DEFAULT_TRANSFORM_HANDLE_SPACING + 8
 diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
-index 90ecdafe8..ac3426d87 100644
+index 90ecdafe8..1fdf16e4d 100644
 --- a/packages/element/src/types.ts
 +++ b/packages/element/src/types.ts
-@@ -163,11 +163,31 @@ export type InitializedExcalidrawImageElement = MarkNonNullable<
+@@ -160,14 +160,65 @@ export type InitializedExcalidrawImageElement = MarkNonNullable<
+   "fileId"
+ >;
+ 
++export type FrameAutoLayoutAlign =
++  | "top-left"
++  | "top-center"
++  | "top-right"
++  | "center-left"
++  | "center"
++  | "center-right"
++  | "bottom-left"
++  | "bottom-center"
++  | "bottom-right";
++
++export type FrameAutoLayoutHug = {
++  horizontal: boolean;
++  vertical: boolean;
++};
++
  export type ExcalidrawFrameElement = _ExcalidrawElementBase & {
    type: "frame";
    name: string | null;
@@ -851,6 +1045,16 @@ index 90ecdafe8..ac3426d87 100644
 +    vertical: number;
 +  };
 +  autoLayoutGap: number;
++  /**
++   * When true, that axis hugs (fits) children during auto-layout.
++   * When false, the axis stays at the current width/height (Fixed).
++   */
++  autoLayoutHug: {
++    horizontal: boolean;
++    vertical: boolean;
++  };
++  /** Child packing/alignment inside the frame while auto-layout is on. */
++  autoLayoutAlign: FrameAutoLayoutAlign;
 +  /** In-frame title font size. Defaults to FRAME_STYLE.nameFontSize. */
 +  fontSize: number;
 +  /** In-frame title color. Null uses the theme default name color. */
@@ -867,6 +1071,11 @@ index 90ecdafe8..ac3426d87 100644
 +    vertical: number;
 +  };
 +  autoLayoutGap: number;
++  autoLayoutHug: {
++    horizontal: boolean;
++    vertical: boolean;
++  };
++  autoLayoutAlign: FrameAutoLayoutAlign;
 +  fontSize: number;
 +  nameColor: string | null;
  };
@@ -1172,10 +1381,10 @@ index fa13b7a60..a9711f82f 100644
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 3e07f9254..725a3a432 100644
+index 3e07f9254..fc3876058 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -259,6 +259,15 @@ import {
+@@ -259,6 +259,18 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
    isNonDeletedElement,
@@ -1184,14 +1393,17 @@ index 3e07f9254..725a3a432 100644
 +  DEFAULT_FRAME_CONTENT_PADDING_Y,
 +  DEFAULT_FRAME_AUTO_LAYOUT_GAP,
 +  getFittedFrameGeometry,
++  getFrameAutoLayoutAlign,
++  getFrameAutoLayoutHug,
 +  getFrameNameColor,
 +  getFrameNameFontSize,
 +  layoutAutoLayoutFrames,
 +  layoutFrameChildren,
++  normalizeFrameAutoLayoutHug,
  } from "@excalidraw/element";
  
  import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
-@@ -335,6 +344,10 @@ import {
+@@ -335,6 +347,10 @@ import {
    actionRemoveAllElementsFromFrame,
    actionSelectAllElementsInFrame,
    actionWrapSelectionInFrame,
@@ -1202,7 +1414,7 @@ index 3e07f9254..725a3a432 100644
  } from "../actions/actionFrame";
  import { createRedoAction, createUndoAction } from "../actions/actionHistory";
  import { actionTextAutoResize } from "../actions/actionTextAutoResize";
-@@ -787,6 +800,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -787,6 +803,11 @@ class App extends React.Component<AppProps, AppState> {
        refreshTextElementDimensions: this.refreshTextElementDimensions,
        rerouteElbowArrow: this.rerouteElbowArrow,
        rotateSelectedElements: this.rotateSelectedElements,
@@ -1214,7 +1426,7 @@ index 3e07f9254..725a3a432 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -2159,8 +2177,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2159,8 +2180,16 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -1232,7 +1444,7 @@ index 3e07f9254..725a3a432 100644
          this.state,
        );
  
-@@ -2204,11 +2230,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2204,11 +2233,11 @@ class App extends React.Component<AppProps, AppState> {
                borderRadius: 4,
                boxShadow: "inset 0 0 0 1px var(--color-primary)",
                fontFamily: "Assistant",
@@ -1248,7 +1460,7 @@ index 3e07f9254..725a3a432 100644
                overflow: "hidden",
                maxWidth: `${
                  document.body.clientWidth - x1 - FRAME_NAME_EDIT_PADDING
-@@ -2232,29 +2258,25 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2232,29 +2261,25 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -1290,7 +1502,7 @@ index 3e07f9254..725a3a432 100644
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
              whiteSpace: "nowrap",
              textOverflow: "ellipsis",
-@@ -5189,6 +5211,165 @@ class App extends React.Component<AppProps, AppState> {
+@@ -5189,6 +5214,184 @@ class App extends React.Component<AppProps, AppState> {
        return rotated;
      };
  
@@ -1343,6 +1555,8 @@ index 3e07f9254..725a3a432 100644
 +      height: opts.height,
 +      padding: opts.padding,
 +      gap: opts.gap,
++      hug: opts.hug,
++      align: opts.align,
 +    });
 +  };
 +
@@ -1377,11 +1591,24 @@ index 3e07f9254..725a3a432 100644
 +    const autoLayout =
 +      opts.autoLayout !== undefined ? opts.autoLayout : frame.autoLayout;
 +    const gap = opts.gap ?? frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
++    const currentHug = getFrameAutoLayoutHug(frame);
++    const hug =
++      opts.hug !== undefined
++        ? normalizeFrameAutoLayoutHug(opts.hug, currentHug)
++        : {
++            horizontal:
++              opts.width !== undefined ? false : currentHug.horizontal,
++            vertical:
++              opts.height !== undefined ? false : currentHug.vertical,
++          };
++    const align = opts.align ?? getFrameAutoLayoutAlign(frame);
 +
 +    mutateElement(frame, elementsMap, {
 +      autoLayout,
 +      autoLayoutPadding: padding,
 +      autoLayoutGap: gap,
++      autoLayoutHug: hug,
++      autoLayoutAlign: align,
 +      ...(opts.width !== undefined ? { width: opts.width } : null),
 +      ...(opts.height !== undefined ? { height: opts.height } : null),
 +    });
@@ -1396,6 +1623,8 @@ index 3e07f9254..725a3a432 100644
 +          height: opts.height,
 +          padding,
 +          gap,
++          hug,
++          align,
 +        },
 +      );
 +    }
@@ -1430,6 +1659,8 @@ index 3e07f9254..725a3a432 100644
 +      },
 +      autoLayoutGap:
 +        frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP,
++      autoLayoutHug: getFrameAutoLayoutHug(frame),
++      autoLayoutAlign: getFrameAutoLayoutAlign(frame),
 +      clip: frame.clip,
 +    };
 +  };
@@ -1456,7 +1687,7 @@ index 3e07f9254..725a3a432 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -10868,15 +11049,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -10868,15 +11071,11 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -1477,7 +1708,7 @@ index 3e07f9254..725a3a432 100644
          // Only update the state if there is a difference
          this.updateFrameToHighlight(frameToHighlight);
  
-@@ -11944,6 +12121,17 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11944,6 +12143,17 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -1495,7 +1726,7 @@ index 3e07f9254..725a3a432 100644
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12077,6 +12265,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12077,6 +12287,8 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -1504,7 +1735,7 @@ index 3e07f9254..725a3a432 100644
            this.scene.replaceAllElements(nextElements);
          }
        }
-@@ -12120,6 +12310,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12120,6 +12332,8 @@ class App extends React.Component<AppProps, AppState> {
            );
          }
  
@@ -1513,7 +1744,7 @@ index 3e07f9254..725a3a432 100644
          this.scene.replaceAllElements(nextElements);
        }
  
-@@ -13704,6 +13896,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13704,6 +13918,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -1702,7 +1933,7 @@ index 49b8405da..019ee485f 100644
  };
  
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
-index cee1002c2..7233d6d64 100644
+index cee1002c2..344533f0e 100644
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
 @@ -10,6 +10,7 @@ import {
@@ -1713,7 +1944,7 @@ index cee1002c2..7233d6d64 100644
    DEFAULT_GRID_SIZE,
    DEFAULT_GRID_STEP,
    randomId,
-@@ -715,6 +716,15 @@ export const restoreElement = (
+@@ -715,6 +716,20 @@ export const restoreElement = (
      case "frame":
        return restoreElementWithProperties(element, {
          name: element.name ?? null,
@@ -1724,6 +1955,11 @@ index cee1002c2..7233d6d64 100644
 +          vertical: 12,
 +        },
 +        autoLayoutGap: element.autoLayoutGap ?? 16,
++        autoLayoutHug: element.autoLayoutHug ?? {
++          horizontal: true,
++          vertical: true,
++        },
++        autoLayoutAlign: element.autoLayoutAlign ?? "top-left",
 +        fontSize: element.fontSize ?? FRAME_STYLE.nameFontSize,
 +        nameColor: element.nameColor ?? null,
        });
@@ -2143,14 +2379,27 @@ index 4da68316d..1afe9567f 100644
    // a few tests with exportToCanvas (where we can't inspect elements)
    // ---------------------------------------------------------------------------
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 9a4dc372c..f920f5aaa 100644
+index 9a4dc372c..9def785fd 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -1197,6 +1197,30 @@ export type ExcalidrawImperativeAPIEventMap = {
+@@ -44,6 +44,10 @@ import type {
+   ValueOf,
+   MakeBrand,
+ } from "@excalidraw/common/utility-types";
++import type {
++  FrameAutoLayoutAlign,
++  FrameAutoLayoutHug,
++} from "@excalidraw/element/types";
+ 
+ import type {
+   CaptureUpdateActionType,
+@@ -1197,6 +1201,34 @@ export type ExcalidrawImperativeAPIEventMap = {
    "editor:unmount": [];
  };
  
 +export type FrameAutoLayoutDirection = "vertical" | "horizontal";
++
++export type { FrameAutoLayoutAlign, FrameAutoLayoutHug };
 +
 +export type FrameAutoLayoutPadding =
 +  | number
@@ -2171,13 +2420,15 @@ index 9a4dc372c..f920f5aaa 100644
 +    vertical: number;
 +  };
 +  autoLayoutGap: number;
++  autoLayoutHug: FrameAutoLayoutHug;
++  autoLayoutAlign: FrameAutoLayoutAlign;
 +  clip: boolean;
 +};
 +
  export interface ExcalidrawImperativeAPI {
    /** Whether the editor has been unmounted and the API is no longer usable. */
    isDestroyed: boolean;
-@@ -1241,6 +1265,62 @@ export interface ExcalidrawImperativeAPI {
+@@ -1241,6 +1273,66 @@ export interface ExcalidrawImperativeAPI {
    ) => boolean;
    refreshTextElementDimensions: (elementIds?: string | string[]) => boolean;
    rerouteElbowArrow: (elementId: string) => boolean;
@@ -2207,11 +2458,13 @@ index 9a4dc372c..f920f5aaa 100644
 +      height?: number;
 +      padding?: FrameAutoLayoutPadding;
 +      gap?: number;
++      hug?: boolean | Partial<FrameAutoLayoutHug>;
++      align?: FrameAutoLayoutAlign;
 +    },
 +  ) => boolean;
 +  /**
 +   * Updates frame layout settings, including width, height, auto-layout direction,
-+   * horizontal/vertical padding, and item gap.
++   * padding, gap, per-axis hug (fit-to-content), and child alignment.
 +   */
 +  updateFrameLayout: (
 +    frameId: string,
@@ -2221,6 +2474,8 @@ index 9a4dc372c..f920f5aaa 100644
 +      height?: number;
 +      padding?: FrameAutoLayoutPadding;
 +      gap?: number;
++      hug?: boolean | Partial<FrameAutoLayoutHug>;
++      align?: FrameAutoLayoutAlign;
 +    },
 +  ) => boolean;
 +  /**

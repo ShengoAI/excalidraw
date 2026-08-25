@@ -50,7 +50,7 @@ index 2ba0fb121..bcf94fc0f 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index c23ba4409..94d07b5d5 100644
+index 8177bdcf0..9f4200008 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -2,6 +2,8 @@ import {
@@ -62,9 +62,9 @@ index c23ba4409..94d07b5d5 100644
  } from "@excalidraw/common";
  import {
    isPointWithinBounds,
-@@ -54,8 +56,12 @@ export const DEFAULT_FRAME_AUTO_LAYOUT_PADDING = 16;
- export const DEFAULT_FRAME_CONTENT_PADDING_Y = 12;
- export const DEFAULT_FRAME_AUTO_LAYOUT_GAP = 16;
+@@ -132,8 +134,12 @@ const alignmentOffset = (
+   return 0;
+ };
  // Title block height (nameInsetY 12 + nameFontSize * nameLineHeight 17.5 = 29.5).
 -// The 12px gap below the title is padding.vertical, not part of this constant.
 -export const DEFAULT_FRAME_TITLE_HEIGHT = FRAME_TITLE_BLOCK_HEIGHT;
@@ -77,7 +77,7 @@ index c23ba4409..94d07b5d5 100644
  
  export const getFrameNameFontSize = (
    frame?: Pick<ExcalidrawFrameLikeElement, "fontSize"> | null,
-@@ -72,9 +78,12 @@ export const getFrameNameColor = (
+@@ -150,9 +156,12 @@ export const getFrameNameColor = (
  
  export const getFrameTitleReservedHeight = (
    frame?: Pick<ExcalidrawFrameLikeElement, "fontSize"> | null,
@@ -93,7 +93,7 @@ index c23ba4409..94d07b5d5 100644
  
  export const getFittedFrameGeometry = (
    childBounds: readonly [number, number, number, number],
-@@ -92,7 +101,11 @@ export const getFittedFrameGeometry = (
+@@ -170,7 +179,11 @@ export const getFittedFrameGeometry = (
      x: x1 - padX,
      y: y1 - titleHeight - padY,
      width: x2 - x1 + padX * 2,
@@ -106,23 +106,17 @@ index c23ba4409..94d07b5d5 100644
    };
  };
  
-@@ -603,9 +616,12 @@ export const layoutFrameChildren = (
+@@ -670,7 +683,7 @@ export const layoutFrameChildren = (
    }
  
+   const titleHeight = getFrameTitleReservedHeight(frame);
+-  const bottomReserve = padding.vertical;
++  const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
    const contentFrameWidth = contentWidth + padding.horizontal * 2;
--  // Include title height in the frame height calculation
-+  // Title above content, footer reserved band below (16px gap + label + 12px)
    const contentFrameHeight =
--    contentHeight + titleHeight + padding.vertical * 2;
-+    contentHeight +
-+    titleHeight +
-+    padding.vertical +
-+    SHAPE_FOOTER_RESERVED_HEIGHT;
- 
-   mutateElement(frame, elementsMap, {
-     width: Math.max(opts.width ?? frame.width, contentFrameWidth),
+     contentHeight + titleHeight + padding.vertical + bottomReserve;
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 783c59b62..e9ad69cf4 100644
+index d805fd8b8..cbe1b8143 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -135,7 +129,7 @@ index 783c59b62..e9ad69cf4 100644
    IMAGE_MIME_TYPES,
    IMAGE_RENDER_TIMEOUT,
    LINE_CONFIRM_THRESHOLD,
-@@ -663,6 +666,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -666,6 +669,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -152,7 +146,7 @@ index 783c59b62..e9ad69cf4 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2178,17 +2191,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2181,17 +2194,12 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -176,7 +170,7 @@ index 783c59b62..e9ad69cf4 100644
        );
  
        const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2259,7 +2267,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2262,7 +2270,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -186,7 +180,7 @@ index 783c59b62..e9ad69cf4 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2275,7 +2284,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2278,7 +2287,11 @@ class App extends React.Component<AppProps, AppState> {
                  : `${
                      Math.max(
                        0,
@@ -199,7 +193,7 @@ index 783c59b62..e9ad69cf4 100644
                      ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2301,6 +2314,280 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2304,6 +2317,280 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -480,7 +474,7 @@ index 783c59b62..e9ad69cf4 100644
    private toggleOverscrollBehavior(event: React.PointerEvent) {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2679,6 +2966,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2682,6 +2969,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}
@@ -527,10 +521,30 @@ index 58c098771..acb6d6edf 100644
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 8f2df4be1..09a4e3203 100644
+index 1148988ca..1dc990280 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -921,6 +921,45 @@ export interface ExcalidrawProps {
+@@ -37,6 +37,8 @@ import type {
+   StrokeVariability,
+   ElementShadow,
+   NonDeletedSceneElementsMap,
++  FrameAutoLayoutAlign,
++  FrameAutoLayoutHug,
+ } from "@excalidraw/element/types";
+ 
+ import type {
+@@ -45,10 +47,6 @@ import type {
+   ValueOf,
+   MakeBrand,
+ } from "@excalidraw/common/utility-types";
+-import type {
+-  FrameAutoLayoutAlign,
+-  FrameAutoLayoutHug,
+-} from "@excalidraw/element/types";
+ 
+ import type {
+   CaptureUpdateActionType,
+@@ -925,6 +923,45 @@ export interface ExcalidrawProps {
      element: NonDeleted<ExcalidrawEmbeddableElement>,
      appState: AppState,
    ) => JSX.Element | null;

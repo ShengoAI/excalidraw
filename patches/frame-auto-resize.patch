@@ -90,7 +90,7 @@ index 287fdf2df..a322a6628 100644
  
    const origElements: ExcalidrawElement[] = [];
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf285..8177bdcf0 100644
+index bc2cdf285..e6dfd61f9 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -1,4 +1,8 @@
@@ -254,7 +254,63 @@ index bc2cdf285..8177bdcf0 100644
        element.frameId === frame.id,
    );
  
-@@ -444,6 +572,198 @@ export const getContainingFrame = (
+@@ -145,6 +273,42 @@ export const elementsAreInFrameBounds = (
+   );
+ };
+ 
++/**
++ * Nested frames are added only when the moving frame is strictly smaller and
++ * fully inside the target. Mere overlap or touching must not nest them.
++ */
++export const isFrameFullyContainedByFrame = (
++  inner: ExcalidrawFrameLikeElement,
++  outer: ExcalidrawFrameLikeElement,
++  elementsMap: ElementsMap,
++) => {
++  if (inner.id === outer.id) {
++    return false;
++  }
++
++  const [innerX1, innerY1, innerX2, innerY2] = getElementAbsoluteCoords(
++    inner,
++    elementsMap,
++  );
++  const [outerX1, outerY1, outerX2, outerY2] = getElementAbsoluteCoords(
++    outer,
++    elementsMap,
++  );
++  const innerWidth = innerX2 - innerX1;
++  const innerHeight = innerY2 - innerY1;
++  const outerWidth = outerX2 - outerX1;
++  const outerHeight = outerY2 - outerY1;
++
++  return (
++    innerWidth < outerWidth &&
++    innerHeight < outerHeight &&
++    outerX1 <= innerX1 &&
++    outerY1 <= innerY1 &&
++    outerX2 >= innerX2 &&
++    outerY2 >= innerY2
++  );
++};
++
+ export const elementOverlapsWithFrame = (
+   element: ExcalidrawElement,
+   frame: ExcalidrawFrameLikeElement,
+@@ -280,6 +444,12 @@ export const getRootElements = <T extends ExcalidrawElement>(
+   );
+ };
+ 
++/**
++ * Geometry-based membership candidates for a frame. Used when drawing a new
++ * frame and when grouping. Do not use this to mutate membership of an
++ * existing frame on resize — children are added only by dragging in, and
++ * removed only by dragging out.
++ */
+ export const getElementsInResizingFrame = (
+   allElements: ExcalidrawElementsIncludingDeleted,
+   frame: ExcalidrawFrameLikeElement,
+@@ -444,6 +614,198 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -453,7 +509,7 @@ index bc2cdf285..8177bdcf0 100644
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +786,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +828,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -472,7 +528,29 @@ index bc2cdf285..8177bdcf0 100644
        continue;
      }
  
-@@ -521,7 +843,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+@@ -481,7 +845,9 @@ export const filterElementsEligibleAsFrameChildren = (
+         const groupElements = getElementsInGroup(elements, shallowestGroupId);
+         if (
+           groupElements.some((el) =>
+-            elementOverlapsWithFrame(el, frame, elementsMap),
++            isFrameLikeElement(el)
++              ? isFrameFullyContainedByFrame(el, frame, elementsMap)
++              : elementOverlapsWithFrame(el, frame, elementsMap),
+           )
+         ) {
+           for (const child of groupElements) {
+@@ -490,7 +856,9 @@ export const filterElementsEligibleAsFrameChildren = (
+         }
+       }
+     } else {
+-      const overlaps = elementOverlapsWithFrame(element, frame, elementsMap);
++      const overlaps = isFrameLikeElement(element)
++        ? isFrameFullyContainedByFrame(element, frame, elementsMap)
++        : elementOverlapsWithFrame(element, frame, elementsMap);
+       if (overlaps) {
+         eligibleElements.push(element);
+       }
+@@ -521,7 +889,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
  export const getFrameChildrenInsertionIndex = (
    elements: readonly ExcalidrawElement[],
    frameId: ExcalidrawFrameLikeElement["id"],
@@ -496,7 +574,7 @@ index bc2cdf285..8177bdcf0 100644
    for (let index = elements.length - 1; index >= 0; index--) {
      const element = elements[index];
  
-@@ -566,11 +904,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +950,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -515,7 +593,7 @@ index bc2cdf285..8177bdcf0 100644
        continue;
      }
  
-@@ -610,9 +950,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -610,9 +996,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
    const otherElements = Array.from(allElements.values()).filter(
      (element) => !finalElementsToAdd.has(element),
    );
@@ -529,7 +607,7 @@ index bc2cdf285..8177bdcf0 100644
    );
  
    if (insertionIndex === null) {
-@@ -725,9 +1069,9 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,11 +1115,21 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -539,8 +617,33 @@ index bc2cdf285..8177bdcf0 100644
 -      !isFrameLikeElement(element) &&
        !isElementInFrame(element, elementsMap, appState)
      ) {
++      if (isFrameLikeElement(element)) {
++        const currentParent = elementsMap.get(element.frameId);
++        if (
++          currentParent &&
++          isFrameLikeElement(currentParent) &&
++          elementOverlapsWithFrame(element, currentParent, elementsMap)
++        ) {
++          return;
++        }
++      }
        elementsToRemove.add(element);
-@@ -919,6 +1263,11 @@ export const shouldApplyFrameClip = (
+     }
+   });
+@@ -855,6 +1255,12 @@ export const isElementInFrame = (
+   }
+ 
+   if (_element.groupIds.length === 0) {
++    if (isFrameLikeElement(_element)) {
++      if (_element.frameId === frame.id) {
++        return elementOverlapsWithFrame(_element, frame, allElementsMap);
++      }
++      return isFrameFullyContainedByFrame(_element, frame, allElementsMap);
++    }
+     return elementOverlapsWithFrame(_element, frame, allElementsMap);
+   }
+ 
+@@ -919,6 +1325,25 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -549,10 +652,24 @@ index bc2cdf285..8177bdcf0 100644
 +    return false;
 +  }
 +
++  // Members stay clipped even when they sit fully outside the frame bounds.
++  // While dragging a child out (and not the frame itself), unclip once it no
++  // longer overlaps so the user can see it leave.
++  if (element.frameId === frame.id) {
++    if (
++      appState.selectedElementsAreBeingDragged &&
++      appState.selectedElementIds[element.id] &&
++      !appState.selectedElementIds[frame.id]
++    ) {
++      return elementOverlapsWithFrame(element, frame, elementsMap);
++    }
++    return true;
++  }
++
    // for individual elements, only clip when the element is
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
-@@ -968,7 +1317,7 @@ export const shouldApplyFrameClip = (
+@@ -968,7 +1393,7 @@ export const shouldApplyFrameClip = (
    return false;
  };
  
@@ -1381,9 +1498,25 @@ index fa13b7a60..a9711f82f 100644
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 3e07f9254..fc3876058 100644
+index 3e07f9254..4aa0f832c 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
+@@ -181,7 +181,6 @@ import {
+   getFrameChildrenInsertionIndex,
+   isCursorInFrame,
+   addElementsToFrame,
+-  replaceAllElementsInFrame,
+   removeElementsFromFrame,
+   getElementsInResizingFrame,
+   getElementsInNewFrame,
+@@ -189,6 +188,7 @@ import {
+   elementOverlapsWithFrame,
+   updateFrameMembershipOfSelectedElements,
+   isElementInFrame,
++  isFrameFullyContainedByFrame,
+   getFrameLikeTitle,
+   getElementsOverlappingFrame,
+   filterElementsEligibleAsFrameChildren,
 @@ -259,6 +259,18 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
@@ -1687,7 +1820,7 @@ index 3e07f9254..fc3876058 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -10868,15 +11071,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -10868,15 +11071,26 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -1700,15 +1833,30 @@ index 3e07f9254..fc3876058 100644
 -              currentFrameId: getCommonFrameId(selectedElements),
 -              excludeElementIds: this.state.selectedElementIds,
 -            });
-+        // Allow frames to be nested inside other frames
-+        const frameToHighlight = this.getTopLayerFrameAtSceneCoords(pointerCoords, {
++        // Allow frames to be nested inside other frames only when fully inside
++        let frameToHighlight = this.getTopLayerFrameAtSceneCoords(pointerCoords, {
 +          currentFrameId: getCommonFrameId(selectedElements),
 +          excludeElementIds: this.state.selectedElementIds,
 +        });
++        if (frameToHighlight) {
++          const selectedFrames = selectedElements.filter(isFrameLikeElement);
++          if (
++            selectedFrames.length > 0 &&
++            !selectedFrames.every((frame) =>
++              isFrameFullyContainedByFrame(
++                frame,
++                frameToHighlight!,
++                this.scene.getNonDeletedElementsMap(),
++              ),
++            )
++          ) {
++            frameToHighlight = null;
++          }
++        }
          // Only update the state if there is a difference
          this.updateFrameToHighlight(frameToHighlight);
  
-@@ -11944,6 +12143,17 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11944,6 +12158,17 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -1726,7 +1874,27 @@ index 3e07f9254..fc3876058 100644
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12077,6 +12287,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12046,9 +12271,16 @@ class App extends React.Component<AppProps, AppState> {
+             topLayerFrame &&
+             !this.state.selectedElementIds[topLayerFrame.id]
+           ) {
+-            const elementsToAdd = selectedElements.filter((element) =>
+-              isElementInFrame(element, nextElements, this.state),
+-            );
++            const elementsToAdd = selectedElements.filter((element) => {
++              if (isFrameLikeElement(element)) {
++                return isFrameFullyContainedByFrame(
++                  element,
++                  topLayerFrame,
++                  this.scene.getNonDeletedElementsMap(),
++                );
++              }
++              return isElementInFrame(element, nextElements, this.state);
++            });
+ 
+             if (this.state.editingGroupId) {
+               updateGroupIdsAfterEditingGroup(elementsToAdd);
+@@ -12077,6 +12309,8 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -1735,16 +1903,73 @@ index 3e07f9254..fc3876058 100644
            this.scene.replaceAllElements(nextElements);
          }
        }
-@@ -12120,6 +12332,8 @@ class App extends React.Component<AppProps, AppState> {
-           );
-         }
+@@ -12095,31 +12329,11 @@ class App extends React.Component<AppProps, AppState> {
+         });
+       }
  
+-      // handle frame membership for resizing frames and/or selected elements
++      // Frame membership is drag-only. Resizing must not add covered shapes
++      // or drop children that are clipped out of view.
+       if (pointerDownState.resize.isResizing) {
+-        let nextElements = updateFrameMembershipOfSelectedElements(
+-          this.scene.getElementsIncludingDeleted(),
+-          this.state,
+-          this,
+-        );
+-
+-        const selectedFrames = this.scene
+-          .getSelectedElements(this.state)
+-          .filter(isFrameLikeElement);
+-
+-        for (const frame of selectedFrames) {
+-          nextElements = replaceAllElementsInFrame(
+-            nextElements,
+-            getElementsInResizingFrame(
+-              this.scene.getElementsIncludingDeleted(),
+-              frame,
+-              this.state,
+-              elementsMap,
+-            ),
+-            frame,
+-          );
+-        }
+-
++        const nextElements = this.scene.getElementsIncludingDeleted();
 +        layoutAutoLayoutFrames(nextElements);
-+
          this.scene.replaceAllElements(nextElements);
        }
  
-@@ -13704,6 +13918,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13606,29 +13820,6 @@ class App extends React.Component<AppProps, AppState> {
+         pointerDownState.resize.center.y,
+       )
+     ) {
+-      const elementsToHighlight = new Set<NonDeletedExcalidrawElement>();
+-      selectedFrames.forEach((frame) => {
+-        getElementsInResizingFrame(
+-          this.scene.getNonDeletedElements(),
+-          frame,
+-          this.state,
+-          this.scene.getNonDeletedElementsMap(),
+-        ).forEach((element) => {
+-          if (isNonDeletedElement(element)) {
+-            elementsToHighlight.add(element);
+-          } else {
+-            // SAFETY: This should never happen, but log it just in case
+-            console.error(
+-              "[NONDELETED][INVARIANT] Skipped highlighting deleted element in resizing frame",
+-            );
+-          }
+-        });
+-      });
+-
+-      this.setState({
+-        elementsToHighlight: [...elementsToHighlight],
+-      });
+-
+       return true;
+     }
+     return false;
+@@ -13704,6 +13895,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -1800,6 +2025,139 @@ index 3ecb79e4e..1269b4275 100644
    const width = matchedMetrics.width;
  
    return [
+diff --git a/packages/excalidraw/components/Stats/Dimension.tsx b/packages/excalidraw/components/Stats/Dimension.tsx
+index 623d54779..752fab88b 100644
+--- a/packages/excalidraw/components/Stats/Dimension.tsx
++++ b/packages/excalidraw/components/Stats/Dimension.tsx
+@@ -3,14 +3,10 @@ import { clamp, round } from "@excalidraw/math";
+ import { MIN_WIDTH_OR_HEIGHT } from "@excalidraw/common";
+ import {
+   MINIMAL_CROP_SIZE,
+-  getNonDeletedElements,
+   getUncroppedWidthAndHeight,
+ } from "@excalidraw/element";
+ import { resizeSingleElement } from "@excalidraw/element";
+ import { isImageElement } from "@excalidraw/element";
+-import { isFrameLikeElement } from "@excalidraw/element";
+-import { getElementsInResizingFrame } from "@excalidraw/element";
+-import { replaceAllElementsInFrame } from "@excalidraw/element";
+ 
+ import type {
+   ExcalidrawElement,
+@@ -22,10 +18,7 @@ import type { Scene } from "@excalidraw/element";
+ import DragInput from "./DragInput";
+ import { getStepSizedValue, isPropertyEditable } from "./utils";
+ 
+-import type {
+-  DragFinishedCallbackType,
+-  DragInputCallbackType,
+-} from "./DragInput";
++import type { DragInputCallbackType } from "./DragInput";
+ import type { AppState } from "../../types";
+ 
+ interface DimensionDragInputProps {
+@@ -53,8 +46,6 @@ const handleDimensionChange: DragInputCallbackType<
+   originalAppState,
+   instantChange,
+   scene,
+-  app,
+-  setAppState,
+ }) => {
+   const elementsMap = scene.getNonDeletedElementsMap();
+   const origElement = originalElements[0];
+@@ -197,24 +188,6 @@ const handleDimensionChange: DragInputCallbackType<
+         },
+       );
+ 
+-      // Handle frame membership update for resized frames
+-      if (isFrameLikeElement(latestElement)) {
+-        const nextElementsInFrame = getElementsInResizingFrame(
+-          scene.getElementsIncludingDeleted(),
+-          latestElement,
+-          originalAppState,
+-          scene.getNonDeletedElementsMap(),
+-        );
+-
+-        const updatedElements = replaceAllElementsInFrame(
+-          scene.getElementsIncludingDeleted(),
+-          nextElementsInFrame,
+-          latestElement,
+-        );
+-
+-        scene.replaceAllElements(updatedElements);
+-      }
+-
+       return;
+     }
+ 
+@@ -264,59 +237,10 @@ const handleDimensionChange: DragInputCallbackType<
+           shouldMaintainAspectRatio: keepAspectRatio,
+         },
+       );
+-
+-      // Handle highlighting frame element candidates
+-      if (isFrameLikeElement(latestElement)) {
+-        const nextElementsInFrame = getNonDeletedElements(
+-          getElementsInResizingFrame(
+-            scene.getElementsIncludingDeleted(),
+-            latestElement,
+-            originalAppState,
+-            scene.getNonDeletedElementsMap(),
+-          ),
+-        );
+-
+-        setAppState({
+-          elementsToHighlight: nextElementsInFrame,
+-        });
+-      }
+     }
+   }
+ };
+ 
+-const handleDragFinished: DragFinishedCallbackType = ({
+-  setAppState,
+-  app,
+-  originalElements,
+-  originalAppState,
+-}) => {
+-  const elementsMap = app.scene.getNonDeletedElementsMap();
+-  const origElement = originalElements?.[0];
+-  const latestElement = origElement && elementsMap.get(origElement.id);
+-
+-  // Handle frame membership update for resized frames
+-  if (latestElement && isFrameLikeElement(latestElement)) {
+-    const nextElementsInFrame = getElementsInResizingFrame(
+-      app.scene.getElementsIncludingDeleted(),
+-      latestElement,
+-      originalAppState,
+-      app.scene.getNonDeletedElementsMap(),
+-    );
+-
+-    const updatedElements = replaceAllElementsInFrame(
+-      app.scene.getElementsIncludingDeleted(),
+-      nextElementsInFrame,
+-      latestElement,
+-    );
+-
+-    app.scene.replaceAllElements(updatedElements);
+-
+-    setAppState({
+-      elementsToHighlight: null,
+-    });
+-  }
+-};
+-
+ const DimensionDragInput = ({
+   property,
+   element,
+@@ -353,7 +277,6 @@ const DimensionDragInput = ({
+       scene={scene}
+       appState={appState}
+       property={property}
+-      dragFinishedCallback={handleDragFinished}
+     />
+   );
+ };
 diff --git a/packages/excalidraw/components/Stats/MultiAngle.tsx b/packages/excalidraw/components/Stats/MultiAngle.tsx
 index e232f5ec1..45e7e6e57 100644
 --- a/packages/excalidraw/components/Stats/MultiAngle.tsx
@@ -1918,6 +2276,152 @@ index e232f5ec1..45e7e6e57 100644
  
      const boundTextElement = getBoundTextElement(latestElement, elementsMap);
      if (boundTextElement && !isArrowElement(latestElement)) {
+diff --git a/packages/excalidraw/components/Stats/MultiDimension.tsx b/packages/excalidraw/components/Stats/MultiDimension.tsx
+index ec59bd568..52e4259d1 100644
+--- a/packages/excalidraw/components/Stats/MultiDimension.tsx
++++ b/packages/excalidraw/components/Stats/MultiDimension.tsx
+@@ -2,13 +2,7 @@ import { pointFrom, type GlobalPoint } from "@excalidraw/math";
+ import { useMemo } from "react";
+ 
+ import { MIN_WIDTH_OR_HEIGHT } from "@excalidraw/common";
+-import {
+-  getElementsInResizingFrame,
+-  getNonDeletedElements,
+-  isFrameLikeElement,
+-  replaceAllElementsInFrame,
+-  updateBoundElements,
+-} from "@excalidraw/element";
++import { updateBoundElements } from "@excalidraw/element";
+ import {
+   rescalePointsInElement,
+   resizeSingleElement,
+@@ -31,10 +25,7 @@ import DragInput from "./DragInput";
+ import { getAtomicUnits, getStepSizedValue, isPropertyEditable } from "./utils";
+ import { getElementsInAtomicUnit } from "./utils";
+ 
+-import type {
+-  DragFinishedCallbackType,
+-  DragInputCallbackType,
+-} from "./DragInput";
++import type { DragInputCallbackType } from "./DragInput";
+ import type { AtomicUnit } from "./utils";
+ import type { AppState } from "../../types";
+ 
+@@ -160,8 +151,6 @@ const handleDimensionChange: DragInputCallbackType<
+   nextValue,
+   scene,
+   property,
+-  setAppState,
+-  app,
+ }) => {
+   const elementsMap = scene.getNonDeletedElementsMap();
+   const atomicUnits = getAtomicUnits(originalElements, originalAppState);
+@@ -248,24 +237,6 @@ const handleDimensionChange: DragInputCallbackType<
+               shouldInformMutation: false,
+             },
+           );
+-
+-          // Handle frame membership update for resized frames
+-          if (isFrameLikeElement(latestElement)) {
+-            const nextElementsInFrame = getElementsInResizingFrame(
+-              scene.getElementsIncludingDeleted(),
+-              latestElement,
+-              originalAppState,
+-              scene.getNonDeletedElementsMap(),
+-            );
+-
+-            const updatedElements = replaceAllElementsInFrame(
+-              scene.getElementsIncludingDeleted(),
+-              nextElementsInFrame,
+-              latestElement,
+-            );
+-
+-            scene.replaceAllElements(updatedElements);
+-          }
+         }
+       }
+     }
+@@ -277,7 +248,6 @@ const handleDimensionChange: DragInputCallbackType<
+ 
+   const changeInWidth = property === "width" ? accumulatedChange : 0;
+   const changeInHeight = property === "height" ? accumulatedChange : 0;
+-  const elementsToHighlight: NonDeletedExcalidrawElement[] = [];
+ 
+   for (const atomicUnit of atomicUnits) {
+     const elementsInUnit = getElementsInAtomicUnit(
+@@ -370,64 +340,13 @@ const handleDimensionChange: DragInputCallbackType<
+             shouldInformMutation: false,
+           },
+         );
+-
+-        // Handle highlighting frame element candidates
+-        if (isFrameLikeElement(latestElement)) {
+-          const nextElementsInFrame = getNonDeletedElements(
+-            getElementsInResizingFrame(
+-              scene.getElementsIncludingDeleted(),
+-              latestElement,
+-              originalAppState,
+-              scene.getNonDeletedElementsMap(),
+-            ),
+-          );
+-
+-          elementsToHighlight.push(...nextElementsInFrame);
+-        }
+       }
+     }
+   }
+ 
+-  setAppState({
+-    elementsToHighlight,
+-  });
+-
+   scene.triggerUpdate();
+ };
+ 
+-const handleDragFinished: DragFinishedCallbackType = ({
+-  setAppState,
+-  app,
+-  originalElements,
+-  originalAppState,
+-}) => {
+-  const elementsMap = app.scene.getNonDeletedElementsMap();
+-  const origElement = originalElements?.[0];
+-  const latestElement = origElement && elementsMap.get(origElement.id);
+-
+-  // Handle frame membership update for resized frames
+-  if (latestElement && isFrameLikeElement(latestElement)) {
+-    const nextElementsInFrame = getElementsInResizingFrame(
+-      app.scene.getElementsIncludingDeleted(),
+-      latestElement,
+-      originalAppState,
+-      app.scene.getNonDeletedElementsMap(),
+-    );
+-
+-    const updatedElements = replaceAllElementsInFrame(
+-      app.scene.getElementsIncludingDeleted(),
+-      nextElementsInFrame,
+-      latestElement,
+-    );
+-
+-    app.scene.replaceAllElements(updatedElements);
+-
+-    setAppState({
+-      elementsToHighlight: null,
+-    });
+-  }
+-};
+-
+ const MultiDimension = ({
+   property,
+   elements,
+@@ -475,7 +394,6 @@ const MultiDimension = ({
+       appState={appState}
+       property={property}
+       scene={scene}
+-      dragFinishedCallback={handleDragFinished}
+     />
+   );
+ };
 diff --git a/packages/excalidraw/components/Stats/utils.ts b/packages/excalidraw/components/Stats/utils.ts
 index 49b8405da..019ee485f 100644
 --- a/packages/excalidraw/components/Stats/utils.ts

@@ -50,7 +50,7 @@ index 2ba0fb121..bcf94fc0f 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index 8177bdcf0..9f4200008 100644
+index e6dfd61f9..6770987de 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -2,6 +2,8 @@ import {
@@ -106,7 +106,7 @@ index 8177bdcf0..9f4200008 100644
    };
  };
  
-@@ -670,7 +683,7 @@ export const layoutFrameChildren = (
+@@ -712,7 +725,7 @@ export const layoutFrameChildren = (
    }
  
    const titleHeight = getFrameTitleReservedHeight(frame);
@@ -116,7 +116,7 @@ index 8177bdcf0..9f4200008 100644
    const contentFrameHeight =
      contentHeight + titleHeight + padding.vertical + bottomReserve;
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index d805fd8b8..cbe1b8143 100644
+index d89b7df72..6d5ad2110 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -129,7 +129,16 @@ index d805fd8b8..cbe1b8143 100644
    IMAGE_MIME_TYPES,
    IMAGE_RENDER_TIMEOUT,
    LINE_CONFIRM_THRESHOLD,
-@@ -666,6 +669,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -185,6 +188,8 @@ import {
+   getElementsInResizingFrame,
+   getElementsInNewFrame,
+   getContainingFrame,
++  getAncestorFrames,
++  shouldApplyFrameClip,
+   elementOverlapsWithFrame,
+   updateFrameMembershipOfSelectedElements,
+   isElementInFrame,
+@@ -666,6 +671,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -146,7 +155,7 @@ index d805fd8b8..cbe1b8143 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2181,17 +2194,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2181,17 +2196,12 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -170,7 +179,7 @@ index d805fd8b8..cbe1b8143 100644
        );
  
        const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2262,7 +2270,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2262,7 +2272,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -180,7 +189,7 @@ index d805fd8b8..cbe1b8143 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2278,7 +2287,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2278,7 +2289,11 @@ class App extends React.Component<AppProps, AppState> {
                  : `${
                      Math.max(
                        0,
@@ -193,7 +202,7 @@ index d805fd8b8..cbe1b8143 100644
                      ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2304,6 +2317,280 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2304,6 +2319,331 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -333,6 +342,43 @@ index d805fd8b8..cbe1b8143 100644
 +    }
 +  };
 +
++  private getShapeChromeFrameClipPaths(
++    element: ExcalidrawElement,
++    elementsMap: NonDeletedSceneElementsMap,
++  ): string[] {
++    if (!this.state.frameRendering.enabled || !this.state.frameRendering.clip) {
++      return [];
++    }
++
++    const clipPaths: string[] = [];
++    for (const frame of [...getAncestorFrames(element, elementsMap)].reverse()) {
++      if (
++        frame.clip === false ||
++        !shouldApplyFrameClip(element, frame, this.state, elementsMap)
++      ) {
++        continue;
++      }
++
++      const center = pointFrom(
++        frame.x + frame.width / 2,
++        frame.y + frame.height / 2,
++      );
++      const points = [
++        pointFrom(frame.x, frame.y),
++        pointFrom(frame.x + frame.width, frame.y),
++        pointFrom(frame.x + frame.width, frame.y + frame.height),
++        pointFrom(frame.x, frame.y + frame.height),
++      ]
++        .map((corner) => pointRotateRads(corner, center, frame.angle))
++        .map(
++          ([sceneX, sceneY]) =>
++            `${sceneX - element.x}px ${sceneY - element.y}px`,
++        );
++      clipPaths.push(`polygon(${points.join(", ")})`);
++    }
++    return clipPaths;
++  }
++
 +  private renderShapeChrome() {
 +    const { renderShapeFooter, renderShapeTopLeft, renderShapeTopRight } =
 +      this.props;
@@ -387,6 +433,84 @@ index d805fd8b8..cbe1b8143 100644
 +        this.state,
 +      );
 +
++      const inner = (
++        <div
++          className={`${CLASSES.SHAPE_CHROME}__inner`}
++          style={{
++            position: "relative",
++            width: element.width,
++            height: element.height,
++            transform: `rotate(${element.angle}rad)`,
++            overflow: "hidden",
++          }}
++        >
++          {hasTopLeft && (
++            <div
++              className={`${CLASSES.SHAPE_CHROME}__top-left`}
++              style={{
++                position: "absolute",
++                top: 0,
++                left: 0,
++                padding: `${SHAPE_TOP_PADDING.top}px 0 0 ${SHAPE_TOP_PADDING.horizontal}px`,
++                boxSizing: "border-box",
++                display: "flex",
++                alignItems: "flex-start",
++              }}
++            >
++              <div ref={this.getShapeChromeSlotRef(element.id, "topLeft")}>
++                {topLeft}
++              </div>
++            </div>
++          )}
++          {hasTopRight && (
++            <div
++              className={`${CLASSES.SHAPE_CHROME}__top-right`}
++              style={{
++                position: "absolute",
++                top: 0,
++                right: 0,
++                padding: `${SHAPE_TOP_PADDING.top}px ${SHAPE_TOP_PADDING.horizontal}px 0 0`,
++                boxSizing: "border-box",
++                display: "flex",
++                alignItems: "flex-start",
++                justifyContent: "flex-end",
++              }}
++            >
++              <div ref={this.getShapeChromeSlotRef(element.id, "topRight")}>
++                {topRight}
++              </div>
++            </div>
++          )}
++          {hasFooter && (
++            <div
++              className={`${CLASSES.SHAPE_FOOTER} ${CLASSES.SHAPE_FOOTER}__content`}
++              style={{
++                position: "absolute",
++                left: 0,
++                right: 0,
++                bottom: 0,
++                display: "flex",
++                justifyContent: "center",
++                padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px`,
++                boxSizing: "border-box",
++              }}
++            >
++              {footer}
++            </div>
++          )}
++        </div>
++      );
++
++      const clippedInner = this.getShapeChromeFrameClipPaths(
++        element,
++        elementsMap,
++      ).reduce(
++        (child, clipPath) => (
++          <div style={{ clipPath, position: "relative" }}>{child}</div>
++        ),
++        inner,
++      );
++
 +      return (
 +        <div
 +          key={`shape-chrome-${element.id}`}
@@ -401,71 +525,7 @@ index d805fd8b8..cbe1b8143 100644
 +            zIndex: 3,
 +          }}
 +        >
-+          <div
-+            className={`${CLASSES.SHAPE_CHROME}__inner`}
-+            style={{
-+              position: "relative",
-+              width: element.width,
-+              height: element.height,
-+              transform: `rotate(${element.angle}rad)`,
-+              overflow: "hidden",
-+            }}
-+          >
-+            {hasTopLeft && (
-+              <div
-+                className={`${CLASSES.SHAPE_CHROME}__top-left`}
-+                style={{
-+                  position: "absolute",
-+                  top: 0,
-+                  left: 0,
-+                  padding: `${SHAPE_TOP_PADDING.top}px 0 0 ${SHAPE_TOP_PADDING.horizontal}px`,
-+                  boxSizing: "border-box",
-+                  display: "flex",
-+                  alignItems: "flex-start",
-+                }}
-+              >
-+                <div ref={this.getShapeChromeSlotRef(element.id, "topLeft")}>
-+                  {topLeft}
-+                </div>
-+              </div>
-+            )}
-+            {hasTopRight && (
-+              <div
-+                className={`${CLASSES.SHAPE_CHROME}__top-right`}
-+                style={{
-+                  position: "absolute",
-+                  top: 0,
-+                  right: 0,
-+                  padding: `${SHAPE_TOP_PADDING.top}px ${SHAPE_TOP_PADDING.horizontal}px 0 0`,
-+                  boxSizing: "border-box",
-+                  display: "flex",
-+                  alignItems: "flex-start",
-+                  justifyContent: "flex-end",
-+                }}
-+              >
-+                <div ref={this.getShapeChromeSlotRef(element.id, "topRight")}>
-+                  {topRight}
-+                </div>
-+              </div>
-+            )}
-+            {hasFooter && (
-+              <div
-+                className={`${CLASSES.SHAPE_FOOTER} ${CLASSES.SHAPE_FOOTER}__content`}
-+                style={{
-+                  position: "absolute",
-+                  left: 0,
-+                  right: 0,
-+                  bottom: 0,
-+                  display: "flex",
-+                  justifyContent: "center",
-+                  padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px`,
-+                  boxSizing: "border-box",
-+                }}
-+              >
-+                {footer}
-+              </div>
-+            )}
-+          </div>
++          {clippedInner}
 +        </div>
 +      );
 +    });
@@ -474,7 +534,7 @@ index d805fd8b8..cbe1b8143 100644
    private toggleOverscrollBehavior(event: React.PointerEvent) {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2682,6 +2969,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2682,6 +3022,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}

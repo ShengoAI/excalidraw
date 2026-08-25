@@ -122,7 +122,7 @@ index c23ba4409..94d07b5d5 100644
    mutateElement(frame, elementsMap, {
      width: Math.max(opts.width ?? frame.width, contentFrameWidth),
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index d025aefa7..09471d1bf 100644
+index 783c59b62..e9ad69cf4 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -152,37 +152,41 @@ index d025aefa7..09471d1bf 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2244,6 +2257,9 @@ class App extends React.Component<AppProps, AppState> {
-         frameNameJSX = frameName;
+@@ -2178,17 +2191,12 @@ class App extends React.Component<AppProps, AppState> {
+         return null;
        }
  
+-      const [titleSceneX, titleSceneY] = pointRotateRads(
+-        pointFrom(
+-          f.x + FRAME_STYLE.nameInsetX,
+-          f.y + FRAME_STYLE.nameInsetY,
+-        ),
+-        pointFrom(f.x + f.width / 2, f.y + f.height / 2),
+-        f.angle,
+-      );
+-      const { x: x1, y: y1 } = sceneCoordsToViewportCoords(
+-        { sceneX: titleSceneX, sceneY: titleSceneY },
+-        this.state,
 +      const { topLeftWidth, topRightWidth, titleGap } =
 +        this.getFrameNameChromeOffset(f);
-+
-       return (
-         <div
-           id={this.getFrameNameDOMId(f)}
-@@ -2251,7 +2267,8 @@ class App extends React.Component<AppProps, AppState> {
++      const { x: x1, y: y1 } = this.getFrameNameViewportOrigin(
++        f,
++        topLeftWidth,
++        titleGap,
+       );
+ 
+       const FRAME_NAME_EDIT_PADDING = 6;
+@@ -2259,7 +2267,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
 -            // Position the frame name inside the frame at top-left
 +            // Position the frame name inside the frame at top-left,
 +            // shifted right when a top-left chrome slot is present.
-             top: `${
-               y1 +
-               FRAME_STYLE.nameInsetY * this.state.zoom.value -
-@@ -2259,7 +2276,8 @@ class App extends React.Component<AppProps, AppState> {
-             }px`,
-             left: `${
-               x1 +
--              FRAME_STYLE.nameInsetX * this.state.zoom.value -
-+              (FRAME_STYLE.nameInsetX + topLeftWidth + titleGap) *
-+                this.state.zoom.value -
-               this.state.offsetLeft
-             }px`,
-             zIndex: 2,
-@@ -2273,7 +2291,11 @@ class App extends React.Component<AppProps, AppState> {
+             top: `${y1 - this.state.offsetTop}px`,
+             left: `${x1 - this.state.offsetLeft}px`,
+             transform: `rotate(${f.angle}rad)`,
+@@ -2275,7 +2284,11 @@ class App extends React.Component<AppProps, AppState> {
                  : `${
                      Math.max(
                        0,
@@ -195,7 +199,7 @@ index d025aefa7..09471d1bf 100644
                      ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2299,6 +2321,262 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2301,6 +2314,280 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -205,6 +209,25 @@ index d025aefa7..09471d1bf 100644
 +    const topRightWidth = chromeSlots?.topRight ?? 0;
 +    const titleGap = topLeftWidth > 0 ? SHAPE_TOP_TITLE_GAP : 0;
 +    return { topLeftWidth, topRightWidth, titleGap };
++  };
++
++  private getFrameNameViewportOrigin = (
++    frame: ExcalidrawFrameLikeElement,
++    topLeftWidth: number,
++    titleGap: number,
++  ) => {
++    const [titleSceneX, titleSceneY] = pointRotateRads(
++      pointFrom(
++        frame.x + FRAME_STYLE.nameInsetX + topLeftWidth + titleGap,
++        frame.y + FRAME_STYLE.nameInsetY,
++      ),
++      pointFrom(frame.x + frame.width / 2, frame.y + frame.height / 2),
++      frame.angle,
++    );
++    return sceneCoordsToViewportCoords(
++      { sceneX: titleSceneX, sceneY: titleSceneY },
++      this.state,
++    );
 +  };
 +
 +  private setShapeChromeSlotWidth = (
@@ -238,17 +261,16 @@ index d025aefa7..09471d1bf 100644
 +
 +    const { topLeftWidth, topRightWidth, titleGap } =
 +      this.getFrameNameChromeOffset(element);
-+    const { x: x1 } = sceneCoordsToViewportCoords(
-+      { sceneX: element.x, sceneY: element.y },
-+      this.state,
++    const { x: x1, y: y1 } = this.getFrameNameViewportOrigin(
++      element,
++      topLeftWidth,
++      titleGap,
 +    );
 +
-+    titleEl.style.left = `${
-+      x1 +
-+      (FRAME_STYLE.nameInsetX + topLeftWidth + titleGap) *
-+        this.state.zoom.value -
-+      this.state.offsetLeft
-+    }px`;
++    titleEl.style.top = `${y1 - this.state.offsetTop}px`;
++    titleEl.style.left = `${x1 - this.state.offsetLeft}px`;
++    titleEl.style.transform = `rotate(${element.angle}rad)`;
++    titleEl.style.transformOrigin = "top left";
 +    titleEl.style.maxWidth = `${
 +      Math.max(
 +        0,
@@ -458,7 +480,7 @@ index d025aefa7..09471d1bf 100644
    private toggleOverscrollBehavior(event: React.PointerEvent) {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2677,6 +2955,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2679,6 +2966,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}

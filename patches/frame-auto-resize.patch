@@ -1612,6 +1612,39 @@ index 90ecdafe8..463f65188 100644
  };
  
  export type ExcalidrawFrameLikeElement =
+diff --git a/packages/excalidraw/actions/actionDeleteSelected.tsx b/packages/excalidraw/actions/actionDeleteSelected.tsx
+index 193f5d86d..30071f456 100644
+--- a/packages/excalidraw/actions/actionDeleteSelected.tsx
++++ b/packages/excalidraw/actions/actionDeleteSelected.tsx
+@@ -14,7 +14,7 @@ import {
+   isElbowArrow,
+   isFrameLikeElement,
+ } from "@excalidraw/element";
+-import { getFrameChildren } from "@excalidraw/element";
++import { getFrameChildren, layoutAutoLayoutFrames } from "@excalidraw/element";
+ 
+ import {
+   getElementsInGroup,
+@@ -239,6 +239,9 @@ export const actionDeleteSelected = register({
+           return el;
+         });
+         const nextAppState = handleGroupEditingState(appState, nextElements);
++        layoutAutoLayoutFrames(nextElements, {
++          editingGroupId: nextAppState.editingGroupId,
++        });
+ 
+         return {
+           elements: nextElements,
+@@ -281,6 +284,9 @@ export const actionDeleteSelected = register({
+     );
+ 
+     nextAppState = handleGroupEditingState(nextAppState, nextElements);
++    layoutAutoLayoutFrames(nextElements, {
++      editingGroupId: nextAppState.editingGroupId,
++    });
+ 
+     return {
+       elements: nextElements,
 diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
 index 6ffcc5f5e..e4028cf58 100644
 --- a/packages/excalidraw/actions/actionFrame.ts

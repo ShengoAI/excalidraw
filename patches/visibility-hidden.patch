@@ -1,0 +1,385 @@
+diff --git a/packages/element/src/collision.ts b/packages/element/src/collision.ts
+index 55bbf967c..b529d6cd0 100644
+--- a/packages/element/src/collision.ts
++++ b/packages/element/src/collision.ts
+@@ -46,6 +46,7 @@ import {
+   isImageElement,
+   isLinearElement,
+   isTextElement,
++  isElementHidden,
+ } from "./typeChecks";
+ import {
+   deconstructDiamondElement,
+@@ -341,6 +342,7 @@ export const getAllHoveredElementAtPoint = (
+ 
+     if (
+       isBindableElement(element, false) &&
++      !isElementHidden(element, elementsMap) &&
+       bindingBorderTest(element, point, elementsMap, tolerance)
+     ) {
+       candidateElements.push(element);
+@@ -407,6 +409,7 @@ export const getHoveredElementForFocusPoint = (
+ 
+     if (
+       isBindableElement(element, false) &&
++      !isElementHidden(element, elementsMap) &&
+       bindingBorderTest(element, point, elementsMap, tolerance)
+     ) {
+       candidateElements.push(element);
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index 7c00efdbe..ed94d19bc 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -34,6 +34,7 @@ import { mutateElement } from "./mutateElement";
+ import { getBoundTextElement, getContainerElement } from "./textElement";
+ import { syncMovedIndices } from "./fractionalIndex";
+ import {
++  isElementHidden,
+   isFrameElement,
+   isFrameLikeElement,
+   isTextElement,
+@@ -734,7 +735,11 @@ export const collectAutoLayoutItems = (
+   const order: string[] = [];
+ 
+   for (const element of elements) {
+-    if (!isAutoLayoutMember(element) || element.isDeleted) {
++    if (
++      !isAutoLayoutMember(element) ||
++      element.isDeleted ||
++      isElementHidden(element, elementsMap)
++    ) {
+       continue;
+     }
+     if (opts?.excludeIds?.has(element.id)) {
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+index f944ca9f9..93e47d0ba 100644
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -76,6 +76,7 @@ export type ElementConstructorOpts = MarkOptional<
+   | "locked"
+   | "opacity"
+   | "shadow"
++  | "hidden"
+   | "customData"
+ >;
+ 
+@@ -102,6 +103,7 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     boundElements = null,
+     link = null,
+     locked = DEFAULT_ELEMENT_PROPS.locked,
++    hidden = false,
+     ...rest
+   }: ElementConstructorOpts & Omit<Partial<ExcalidrawGenericElement>, "type">,
+ ) => {
+@@ -159,6 +161,7 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     updated: getUpdatedTimestamp(),
+     link,
+     locked,
++    hidden,
+     customData: rest.customData,
+   };
+   return element;
+diff --git a/packages/element/src/typeChecks.ts b/packages/element/src/typeChecks.ts
+index 9b8d5a0e6..27561bdd4 100644
+--- a/packages/element/src/typeChecks.ts
++++ b/packages/element/src/typeChecks.ts
+@@ -29,6 +29,7 @@ import type {
+   ExcalidrawLineElement,
+   ExcalidrawFlowchartNodeElement,
+   ExcalidrawLinearElementSubType,
++  ElementsMap,
+ } from "./types";
+ 
+ export const isInitializedImageElement = <T extends ExcalidrawElement>(
+@@ -302,6 +303,41 @@ export const isBoundToContainer = <T extends ExcalidrawElement>(
+   );
+ };
+ 
++export const isElementHidden = <T extends ExcalidrawElement>(
++  element: T | null | undefined,
++  elementsMap?: ElementsMap,
++): boolean => {
++  if (!element) {
++    return false;
++  }
++  if (element.hidden) {
++    return true;
++  }
++  if (!elementsMap) {
++    return false;
++  }
++  if (isTextElement(element) && element.containerId) {
++    const container = elementsMap.get(element.containerId);
++    if (container?.hidden) {
++      return true;
++    }
++  }
++  let frameId = element.frameId;
++  const seen = new Set<string>();
++  while (frameId && !seen.has(frameId)) {
++    seen.add(frameId);
++    const frame = elementsMap.get(frameId);
++    if (!frame) {
++      break;
++    }
++    if (frame.hidden) {
++      return true;
++    }
++    frameId = frame.frameId;
++  }
++  return false;
++};
++
+ export const isArrowBoundToElement = (element: ExcalidrawArrowElement) => {
+   return !!element.startBinding || !!element.endBinding;
+ };
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+index 10b0b34ca..df52eb329 100644
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -75,6 +75,8 @@ type _ExcalidrawElementBase = Readonly<{
+       Could be null, i.e. for new elements which were not yet assigned to the scene. */
+   index: FractionalIndex | null;
+   isDeleted: boolean;
++  /** When true, the element is omitted from render, hit-testing, export, and auto-layout packing. */
++  hidden: boolean;
+   /** List of groups the element belongs to.
+       Ordered from deepest to shallowest. */
+   groupIds: readonly GroupId[];
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index d32059416..0cc9dc76e 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -146,6 +146,7 @@ import {
+   isBindingElement,
+   isBindingElementType,
+   isBoundToContainer,
++  isElementHidden,
+   isFrameLikeElement,
+   isImageElement,
+   isEmbeddableElement,
+@@ -831,6 +832,7 @@ class App extends React.Component<AppProps, AppState> {
+       getFrameLayout: this.getFrameLayout,
+       toggleFrameClip: this.toggleFrameClip,
+       setFrameCollapsed: this.setFrameCollapsed,
++      setElementsHidden: this.setElementsHidden,
+       getEditorInterface: () => this.editorInterface,
+       updateFrameRendering: this.updateFrameRendering,
+       toggleSidebar: this.toggleSidebar,
+@@ -5822,6 +5824,69 @@ class App extends React.Component<AppProps, AppState> {
+     return true;
+   };
+ 
++  public setElementsHidden: ExcalidrawImperativeAPI["setElementsHidden"] = (
++    ids,
++    hidden,
++  ) => {
++    const elementsMap = this.scene.getNonDeletedElementsMap();
++    const idsToUpdate = new Set<string>();
++
++    for (const id of ids) {
++      const element = elementsMap.get(id);
++      if (!element) {
++        continue;
++      }
++      idsToUpdate.add(id);
++      const boundText = getBoundTextElement(element, elementsMap);
++      if (boundText) {
++        idsToUpdate.add(boundText.id);
++      }
++    }
++
++    if (!idsToUpdate.size) {
++      return false;
++    }
++
++    let didUpdate = false;
++    for (const id of idsToUpdate) {
++      const element = elementsMap.get(id);
++      if (!element || Boolean(element.hidden) === hidden) {
++        continue;
++      }
++      mutateElement(element, elementsMap, { hidden });
++      didUpdate = true;
++    }
++
++    if (!didUpdate) {
++      return true;
++    }
++
++    if (hidden) {
++      const nextSelectedElementIds = { ...this.state.selectedElementIds };
++      let selectionChanged = false;
++      for (const id of idsToUpdate) {
++        if (nextSelectedElementIds[id]) {
++          delete nextSelectedElementIds[id];
++          selectionChanged = true;
++        }
++      }
++      if (selectionChanged) {
++        this.setState({
++          selectedElementIds: makeNextSelectedElementIds(
++            nextSelectedElementIds,
++            this.state,
++          ),
++        });
++      }
++    }
++
++    layoutAutoLayoutFrames(this.scene.getNonDeletedElements(), {
++      editingGroupId: this.state.editingGroupId,
++    });
++    this.scene.triggerUpdate();
++    return true;
++  };
++
+   public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
+     (elementId, opts = {}) => {
+       if (elementId === null) {
+@@ -7322,9 +7387,11 @@ class App extends React.Component<AppProps, AppState> {
+               (element) =>
+                 (opts?.includeLockedElements || !element.locked) &&
+                 (opts?.includeBoundTextElement ||
+-                  !(isTextElement(element) && element.containerId)),
++                  !(isTextElement(element) && element.containerId)) &&
++                !isElementHidden(element, elementsMap),
+             )
+     )
++      .filter((el) => !isElementHidden(el, elementsMap))
+       .filter((el) => this.hitElement(x, y, el))
+       .filter((element) => {
+         // hitting a frame's element from outside the frame is not considered a hit
+diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
+index 1269b4275..406ad8196 100644
+--- a/packages/excalidraw/components/SearchMenu.tsx
++++ b/packages/excalidraw/components/SearchMenu.tsx
+@@ -25,7 +25,7 @@ import {
+ } from "@excalidraw/common";
+ 
+ import { newTextElement } from "@excalidraw/element";
+-import { isTextElement, isFrameLikeElement } from "@excalidraw/element";
++import { isTextElement, isFrameLikeElement, isElementHidden } from "@excalidraw/element";
+ 
+ import {
+   getDefaultFrameName,
+@@ -792,12 +792,13 @@ const handleSearch = debounce(
+     }
+ 
+     const elements = app.scene.getNonDeletedElements();
+-    const texts = elements.filter((el) =>
+-      isTextElement(el),
++    const elementsMap = app.scene.getNonDeletedElementsMap();
++    const texts = elements.filter(
++      (el) => isTextElement(el) && !isElementHidden(el, elementsMap),
+     ) as ExcalidrawTextElement[];
+ 
+-    const frames = elements.filter((el) =>
+-      isFrameLikeElement(el),
++    const frames = elements.filter(
++      (el) => isFrameLikeElement(el) && !isElementHidden(el, elementsMap),
+     ) as ExcalidrawFrameLikeElement[];
+ 
+     texts.sort((a, b) => a.y - b.y);
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+index ef4804fde..f477881ec 100644
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -434,6 +434,7 @@ const restoreElementWithProperties = <
+     versionNonce: element.versionNonce ?? 0,
+     index: element.index ?? null,
+     isDeleted: element.isDeleted ?? false,
++    hidden: element.hidden ?? false,
+     id: element.id || randomId(),
+     fillStyle: element.fillStyle || DEFAULT_ELEMENT_PROPS.fillStyle,
+     strokeWidth: element.strokeWidth || DEFAULT_ELEMENT_PROPS.strokeWidth,
+diff --git a/packages/excalidraw/scene/Renderer.ts b/packages/excalidraw/scene/Renderer.ts
+index fdcee2a68..2d0ef1efe 100644
+--- a/packages/excalidraw/scene/Renderer.ts
++++ b/packages/excalidraw/scene/Renderer.ts
+@@ -1,6 +1,7 @@
+ import {
+   getCommonFrameId,
+   getFrameChildrenInsertionIndex,
++  isElementHidden,
+   isElementInViewport,
+ } from "@excalidraw/element";
+ 
+@@ -97,11 +98,15 @@ export class Renderer {
+   }) {
+     const elementsMap = toBrandedType<RenderableElementsMap>(new Map());
+     const newElementCanvasElement = newElement?.frameId ? null : newElement;
++    const sceneElementsMap = arrayToMap(elements);
+ 
+     for (const element of elements) {
+       if (newElementCanvasElement?.id === element.id) {
+         continue;
+       }
++      if (isElementHidden(element, sceneElementsMap)) {
++        continue;
++      }
+ 
+       // we don't want to render text element that's being currently edited
+       // (it's rendered on remote only)
+diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
+index 457de28ae..f90adc8da 100644
+--- a/packages/excalidraw/scene/export.ts
++++ b/packages/excalidraw/scene/export.ts
+@@ -15,7 +15,7 @@ import {
+   applyDarkModeFilter,
+ } from "@excalidraw/common";
+ 
+-import { getCommonBounds, getElementAbsoluteCoords } from "@excalidraw/element";
++import { getCommonBounds, getElementAbsoluteCoords, isElementHidden } from "@excalidraw/element";
+ 
+ import {
+   getInitializedImageElements,
+@@ -170,19 +170,23 @@ const prepareElementsForRender = ({
+   exportWithDarkMode: AppState["exportWithDarkMode"];
+ }) => {
+   let nextElements: readonly NonDeletedExcalidrawElement[];
++  const elementsMap = arrayToMap(elements);
++  const visibleElements = elements.filter(
++    (element) => !isElementHidden(element, elementsMap),
++  );
+ 
+   if (exportingFrame) {
+     nextElements = getElementsOverlappingFrame(
+-      elements,
++      visibleElements,
+       exportingFrame,
+-      arrayToMap(elements),
++      arrayToMap(visibleElements),
+     );
+   } else if (frameRendering.enabled && frameRendering.name) {
+-    nextElements = addFrameLabelsAsTextElements(elements, {
++    nextElements = addFrameLabelsAsTextElements(visibleElements, {
+       exportWithDarkMode,
+     });
+   } else {
+-    nextElements = elements;
++    nextElements = visibleElements;
+   }
+ 
+   return nextElements;
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index 51048727a..9a2aef533 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -1405,6 +1405,17 @@ export interface ExcalidrawImperativeAPI {
+     frameId: string,
+     collapsed?: boolean,
+   ) => boolean;
++  /**
++   * Hides or shows scene elements. Hidden elements stay in the frame,
++   * are skipped when rendering and hit-testing, and are omitted from
++   * auto-layout packing so remaining siblings close the gap.
++   * Bound text follows its container. Nested children of a hidden frame
++   * are also treated as hidden.
++   */
++  setElementsHidden: (
++    ids: readonly string[],
++    hidden: boolean,
++  ) => boolean;
+   toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
+   getEditorInterface: () => EditorInterface;
+   /**

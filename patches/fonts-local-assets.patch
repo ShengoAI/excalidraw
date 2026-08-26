@@ -1,0 +1,22 @@
+diff --git a/packages/excalidraw/fonts/ExcalidrawFontFace.ts b/packages/excalidraw/fonts/ExcalidrawFontFace.ts
+index 46ea3d018..3a8b71c8c 100644
+--- a/packages/excalidraw/fonts/ExcalidrawFontFace.ts
++++ b/packages/excalidraw/fonts/ExcalidrawFontFace.ts
+@@ -161,10 +161,15 @@ export class ExcalidrawFontFace {
+         const normalizedBaseUrl = this.normalizeBaseUrl(path);
+         urls.push(new URL(assetUrl, normalizedBaseUrl));
+       });
++    } else if (typeof window !== "undefined" && window.location?.origin) {
++      // Same-origin /fonts — the private package is not hosted on esm.sh
++      urls.push(new URL(assetUrl, this.normalizeBaseUrl("/")));
+     }
+ 
+-    // fallback url for bundled fonts
+-    urls.push(new URL(assetUrl, ExcalidrawFontFace.ASSETS_FALLBACK_URL));
++    // CDN fallback only when no local URL was registered (e.g. non-browser tests)
++    if (urls.length === 0) {
++      urls.push(new URL(assetUrl, ExcalidrawFontFace.ASSETS_FALLBACK_URL));
++    }
+ 
+     return urls;
+   }

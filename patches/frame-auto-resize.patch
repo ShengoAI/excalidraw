@@ -3222,7 +3222,35 @@ index 06a4f094b..c3e1d0f00 100644
    LinearElementEditor,
    getActiveTextElement,
    getElementsInGroup,
-@@ -1640,7 +1641,11 @@ const _renderInteractiveScene = ({
+@@ -1041,6 +1042,27 @@ const renderFrameHighlight = (
+   context.restore();
+ };
+ 
++const renderAutoLayoutDropIndicator = (
++  context: CanvasRenderingContext2D,
++  appState: InteractiveCanvasAppState,
++) => {
++  const indicator = appState.autoLayoutDropIndicator;
++  if (!indicator || !appState.frameToHighlight) {
++    return;
++  }
++
++  context.save();
++  context.translate(appState.scrollX, appState.scrollY);
++  context.strokeStyle = "rgb(0,118,255)";
++  context.lineCap = "round";
++  context.lineWidth = 4 / appState.zoom.value;
++  context.beginPath();
++  context.moveTo(indicator.x1, indicator.y1);
++  context.lineTo(indicator.x2, indicator.y2);
++  context.stroke();
++  context.restore();
++};
++
+ const renderElementsBoxHighlight = (
+   context: CanvasRenderingContext2D,
+   appState: InteractiveCanvasAppState,
+@@ -1640,7 +1662,11 @@ const _renderInteractiveScene = ({
  
    const activeTextElement = getActiveTextElement(selectedElements, appState);
  
@@ -3235,7 +3263,17 @@ index 06a4f094b..c3e1d0f00 100644
      renderResetAutoResizeHandle(
        activeTextElement,
        context,
-@@ -1866,7 +1871,8 @@ const _renderInteractiveScene = ({
+@@ -1727,8 +1753,9 @@ const _renderInteractiveScene = ({
+   if (appState.frameToHighlight) {
+     renderFrameHighlight(
+       context,
+       appState,
+       appState.frameToHighlight,
+       elementsMap,
+     );
++    renderAutoLayoutDropIndicator(context, appState);
+   }
+@@ -1866,7 +1893,8 @@ const _renderInteractiveScene = ({
            // local user
            if (
              locallySelectedIds.has(element.id) &&
@@ -3245,7 +3283,7 @@ index 06a4f094b..c3e1d0f00 100644
            ) {
              selectionColors.push(
                renderConfig.getSelectionColorForElement?.(
-@@ -1969,6 +1975,8 @@ const _renderInteractiveScene = ({
+@@ -1969,6 +1997,8 @@ const _renderInteractiveScene = ({
        if (
          !appState.viewModeEnabled &&
          showBoundingBox &&

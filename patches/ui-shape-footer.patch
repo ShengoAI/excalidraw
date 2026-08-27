@@ -1,5 +1,5 @@
 diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
-index 2ba0fb121..2fc315b24 100644
+index b0e351b9e..c4f588a31 100644
 --- a/packages/common/src/constants.ts
 +++ b/packages/common/src/constants.ts
 @@ -106,6 +106,8 @@ export const CLASSES = {
@@ -119,7 +119,7 @@ index dc49eece4..7c00efdbe 100644
    const contentFrameHeight =
      contentHeight + titleHeight + padding.vertical + bottomReserve;
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index 5b21dd2f4..f944ca9f9 100644
+index 9011f6c06..8c460b434 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -277,7 +277,7 @@ export const newMagicFrameElement = (
@@ -129,10 +129,10 @@ index 5b21dd2f4..f944ca9f9 100644
 -}
 +};
  
- /** computes element x/y offset based on textAlign/verticalAlign */
- const getTextElementPositionOffsets = (
+ /**
+  * The point of the text box its alignment pins, as ratios of width/height.
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 53eb0a097..d32059416 100644
+index aaf5afa47..96d58c1a0 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -145,7 +145,7 @@ index 53eb0a097..d32059416 100644
    IMAGE_MIME_TYPES,
    IMAGE_RENDER_TIMEOUT,
    LINE_CONFIRM_THRESHOLD,
-@@ -185,6 +188,8 @@ import {
+@@ -184,6 +187,8 @@ import {
    getElementsInResizingFrame,
    getElementsInNewFrame,
    getContainingFrame,
@@ -154,7 +154,7 @@ index 53eb0a097..d32059416 100644
    elementOverlapsWithFrame,
    updateFrameMembershipOfSelectedElements,
    isElementInFrame,
-@@ -270,6 +275,7 @@ import {
+@@ -269,6 +274,7 @@ import {
    inferFrameAutoLayoutDirection,
    getFrameNameColor,
    getFrameNameFontSize,
@@ -162,7 +162,7 @@ index 53eb0a097..d32059416 100644
    getCollapsedFrameHeight,
    getAutoLayoutDropIndicator,
    positionAutoLayoutDrop,
-@@ -671,6 +677,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -687,6 +693,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -179,7 +179,7 @@ index 53eb0a097..d32059416 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2187,17 +2203,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2197,17 +2213,12 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -203,7 +203,7 @@ index 53eb0a097..d32059416 100644
        );
  
        const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2246,6 +2257,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2256,6 +2267,10 @@ class App extends React.Component<AppProps, AppState> {
                transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
                color: getFrameNameColor(f, isDarkTheme),
                overflow: "hidden",
@@ -212,9 +212,9 @@ index 53eb0a097..d32059416 100644
 +                f,
 +              ) as React.CSSProperties["textAlign"],
                maxWidth: `${
-                 document.body.clientWidth - x1 - FRAME_NAME_EDIT_PADDING
-               }px`,
-@@ -2268,7 +2283,8 @@ class App extends React.Component<AppProps, AppState> {
+                 this.ownerDocument.body.clientWidth -
+                 x1 -
+@@ -2280,7 +2295,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -224,7 +224,7 @@ index 53eb0a097..d32059416 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2277,14 +2293,30 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2289,14 +2305,30 @@ class App extends React.Component<AppProps, AppState> {
              fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
              color: getFrameNameColor(f, isDarkTheme),
              lineHeight: FRAME_STYLE.nameLineHeight,
@@ -257,7 +257,7 @@ index 53eb0a097..d32059416 100644
                      ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2310,6 +2342,332 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2322,6 +2354,332 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -388,8 +388,8 @@ index 53eb0a097..d32059416 100644
 +    this.shapeChromeObservedNodes.set(observerKey, node);
 +    this.applyShapeChromeSlotWidth(elementId, slot, node.offsetWidth);
 +
-+    if (supportsResizeObserver) {
-+      const observer = new ResizeObserver(() => {
++    if (typeof this.ownerWindow.ResizeObserver === "function") {
++      const observer = new this.ownerWindow.ResizeObserver(() => {
 +        this.applyShapeChromeSlotWidth(elementId, slot, node.offsetWidth);
 +      });
 +      observer.observe(node);
@@ -587,10 +587,10 @@ index 53eb0a097..d32059416 100644
 +    });
 +  }
 +
-   private toggleOverscrollBehavior(event: React.PointerEvent) {
+   private toggleOverscrollBehavior = (event: React.PointerEvent) => {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2688,6 +3046,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2711,6 +3069,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}
@@ -599,10 +599,10 @@ index 53eb0a097..d32059416 100644
                              this.state.activeLockedId && (
                                <UnlockPopup
 diff --git a/packages/excalidraw/css/styles.scss b/packages/excalidraw/css/styles.scss
-index 918834ef5..500533edc 100644
+index 068ba0389..90ad0d9a5 100644
 --- a/packages/excalidraw/css/styles.scss
 +++ b/packages/excalidraw/css/styles.scss
-@@ -912,3 +912,9 @@ body.excalidraw-cursor-resize * {
+@@ -997,3 +997,9 @@ body.excalidraw-cursor-resize * {
      font-family: "Assistant";
    }
  }
@@ -613,10 +613,10 @@ index 918834ef5..500533edc 100644
 +  z-index: 2;
 +}
 diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
-index 58c098771..acb6d6edf 100644
+index 6bfb0ad6f..a0182544b 100644
 --- a/packages/excalidraw/index.tsx
 +++ b/packages/excalidraw/index.tsx
-@@ -106,6 +106,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+@@ -110,6 +110,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
      children,
      validateEmbeddable,
      renderEmbeddable,
@@ -626,7 +626,7 @@ index 58c098771..acb6d6edf 100644
      aiEnabled,
      showDeprecatedFonts,
      renderScrollbars,
-@@ -244,6 +247,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+@@ -254,6 +257,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
            onDuplicate={onDuplicate}
            validateEmbeddable={validateEmbeddable}
            renderEmbeddable={renderEmbeddable}
@@ -637,10 +637,10 @@ index 58c098771..acb6d6edf 100644
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 8c75647c2..51048727a 100644
+index b1d17c4c8..f928c93b9 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -37,6 +37,8 @@ import type {
+@@ -38,6 +38,8 @@ import type {
    StrokeVariability,
    ElementShadow,
    NonDeletedSceneElementsMap,
@@ -649,7 +649,7 @@ index 8c75647c2..51048727a 100644
  } from "@excalidraw/element/types";
  
  import type {
-@@ -45,10 +47,6 @@ import type {
+@@ -46,10 +48,6 @@ import type {
    ValueOf,
    MakeBrand,
  } from "@excalidraw/common/utility-types";
@@ -660,7 +660,7 @@ index 8c75647c2..51048727a 100644
  
  import type {
    CaptureUpdateActionType,
-@@ -934,6 +932,45 @@ export interface ExcalidrawProps {
+@@ -983,6 +981,45 @@ export interface ExcalidrawProps {
      element: NonDeleted<ExcalidrawEmbeddableElement>,
      appState: AppState,
    ) => JSX.Element | null;
@@ -706,7 +706,7 @@ index 8c75647c2..51048727a 100644
    aiEnabled?: boolean;
    showDeprecatedFonts?: boolean;
    hideDefaultRotateHandle?: boolean;
-@@ -1359,7 +1396,7 @@ export interface ExcalidrawImperativeAPI {
+@@ -1431,7 +1468,7 @@ export interface ExcalidrawImperativeAPI {
      clip?: boolean,
    ) => boolean;
    /**

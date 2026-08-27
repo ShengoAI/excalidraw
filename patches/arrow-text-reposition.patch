@@ -187,49 +187,26 @@ index 243f1f7b4..a4c87e2b1 100644
  /**
   * Normalizes line points so that the start point is at [0,0]. This is
   * expected in various parts of the codebase.
-@@ -1871,29 +1972,44 @@ export class LinearElementEditor {
+@@ -1901,16 +2002,27 @@ export class LinearElementEditor {
      if (points.length < 2) {
        mutateElement(boundTextElement, elementsMap, { isDeleted: true });
      }
--    let x = 0;
--    let y = 0;
--    if (element.points.length % 2 === 1) {
-+    let labelAnchorPoint: GlobalPoint;
-+    if (isArrowElement(element) && element.labelPosition != null) {
-+      labelAnchorPoint = getPointAtNormalizedPosition(
-+        points,
-+        element.labelPosition,
-+      );
-+    } else if (element.points.length % 2 === 1) {
-       const index = Math.floor(element.points.length / 2);
--      const midPoint = LinearElementEditor.getPointGlobalCoordinates(
-+      labelAnchorPoint = LinearElementEditor.getPointGlobalCoordinates(
-         element,
-         element.points[index],
-         elementsMap,
-       );
--      x = midPoint[0] - boundTextElement.width / 2;
--      y = midPoint[1] - boundTextElement.height / 2;
-     } else {
-       const index = element.points.length / 2 - 1;
--      const midSegmentMidpoint = LinearElementEditor.getSegmentMidPoint(
-+      labelAnchorPoint = LinearElementEditor.getSegmentMidPoint(
-         element,
-         index + 1,
-         elementsMap,
-       );
 -
--      x = midSegmentMidpoint[0] - boundTextElement.width / 2;
--      y = midSegmentMidpoint[1] - boundTextElement.height / 2;
-     }
--    return { x, y };
-+
-+    return {
-+      x: labelAnchorPoint[0] - boundTextElement.width / 2,
-+      y: labelAnchorPoint[1] - boundTextElement.height / 2,
-+    };
-+  };
-+
+-    const center = LinearElementEditor.getBoundTextElementCenter(
+-      element,
+-      elementsMap,
+-    );
++    const center =
++      isArrowElement(element) && element.labelPosition != null
++        ? getPointAtNormalizedPosition(points, element.labelPosition)
++        : LinearElementEditor.getBoundTextElementCenter(element, elementsMap);
+
+     return {
+       x: center[0] - boundTextElement.width / 2,
+       y: center[1] - boundTextElement.height / 2,
+     };
+   };
+
 +  static getBoundTextNormalizedPositionOnArrow = (
 +    element: ExcalidrawLinearElement,
 +    targetPoint: GlobalPoint,
@@ -240,8 +217,8 @@ index 243f1f7b4..a4c87e2b1 100644
 +      elementsMap,
 +    );
 +    return getClosestNormalizedPositionOnPolyline(points, targetPoint);
-   };
- 
++  };
++
    static getMinMaxXYWithBoundText = (
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
 index db509ba77..d1c2139db 100644

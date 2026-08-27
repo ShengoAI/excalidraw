@@ -1,5 +1,5 @@
 diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
-index b9916b017..2ba0fb121 100644
+index a9ee944df..b0e351b9e 100644
 --- a/packages/common/src/constants.ts
 +++ b/packages/common/src/constants.ts
 @@ -203,12 +203,19 @@ export const FRAME_STYLE = {
@@ -23,12 +23,12 @@ index b9916b017..2ba0fb121 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
-index 287fdf2df..a322a6628 100644
+index 8cb9af38e..01123de51 100644
 --- a/packages/element/src/dragElements.ts
 +++ b/packages/element/src/dragElements.ts
 @@ -34,6 +34,40 @@ import type { Scene } from "./Scene";
  
- import type { ExcalidrawElement } from "./types";
+ import type { ExcalidrawElement, ExcalidrawTextElement } from "./types";
  
 +export const collectFrameDescendants = (
 +  selectedElements: readonly NonDeletedExcalidrawElement[],
@@ -1037,7 +1037,7 @@ index bc2cdf285..dc49eece4 100644
  
  export const getDefaultFrameName = (element: ExcalidrawFrameLikeElement) => {
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index d1c2139db..7c29db3e7 100644
+index a65e38dba..e2e359b09 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -5,6 +5,7 @@ import {
@@ -1145,8 +1145,8 @@ index d1c2139db..7c29db3e7 100644
 -};
 +}
  
- /** computes element x/y offset based on textAlign/verticalAlign */
- const getTextElementPositionOffsets = (
+ /**
+  * The point of the text box its alignment pins, as ratios of width/height.
 diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
 index 22c3ed494..6d77a9db3 100644
 --- a/packages/element/src/renderElement.ts
@@ -1866,10 +1866,10 @@ index 6ffcc5f5e..e4028cf58 100644
 +  },
 +});
 diff --git a/packages/excalidraw/actions/actionProperties.tsx b/packages/excalidraw/actions/actionProperties.tsx
-index c7ee2751c..f528dd7b8 100644
+index 5b04fc2b6..0b3bc7431 100644
 --- a/packages/excalidraw/actions/actionProperties.tsx
 +++ b/packages/excalidraw/actions/actionProperties.tsx
-@@ -24,6 +24,7 @@ import {
+@@ -26,6 +26,7 @@ import {
    reduceToCommonValue,
    invariant,
    FONT_SIZES,
@@ -1877,7 +1877,7 @@ index c7ee2751c..f528dd7b8 100644
    type StrokeWidthKey,
  } from "@excalidraw/common";
  
-@@ -53,6 +54,7 @@ import {
+@@ -55,6 +56,7 @@ import {
    isArrowElement,
    isBoundToContainer,
    isElbowArrow,
@@ -1885,7 +1885,7 @@ index c7ee2751c..f528dd7b8 100644
    isLinearElement,
    isLineElement,
    isTextElement,
-@@ -276,7 +278,7 @@ const changeFontSize = (
+@@ -278,7 +280,7 @@ const changeFontSize = (
    elements: readonly ExcalidrawElement[],
    appState: AppState,
    app: AppClassProperties,
@@ -1894,7 +1894,7 @@ index c7ee2751c..f528dd7b8 100644
    fallbackValue?: ExcalidrawTextElement["fontSize"],
  ) => {
    const newFontSizes = new Set<number>();
-@@ -306,6 +308,13 @@ const changeFontSize = (
+@@ -308,6 +310,13 @@ const changeFontSize = (
  
          return newElement;
        }
@@ -1908,7 +1908,7 @@ index c7ee2751c..f528dd7b8 100644
        return oldElement;
      },
      true,
-@@ -935,6 +944,9 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
+@@ -992,6 +1001,9 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
                    if (isTextElement(element)) {
                      return element.fontSize;
                    }
@@ -1918,7 +1918,7 @@ index c7ee2751c..f528dd7b8 100644
                    const boundTextElement = getBoundTextElement(
                      element,
                      app.scene.getNonDeletedElementsMap(),
-@@ -946,6 +958,7 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
+@@ -1003,6 +1015,7 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
                  },
                  (element) =>
                    isTextElement(element) ||
@@ -1927,10 +1927,10 @@ index c7ee2751c..f528dd7b8 100644
                      element,
                      app.scene.getNonDeletedElementsMap(),
 diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
-index fa13b7a60..a9711f82f 100644
+index 4f7cbd37c..aecfbaaae 100644
 --- a/packages/excalidraw/actions/types.ts
 +++ b/packages/excalidraw/actions/types.ts
-@@ -139,6 +139,10 @@ export type ActionName =
+@@ -140,6 +140,10 @@ export type ActionName =
    | "linkToElement"
    | "cropEditor"
    | "wrapSelectionInFrame"
@@ -1942,19 +1942,19 @@ index fa13b7a60..a9711f82f 100644
    | "togglePolygon";
  
 diff --git a/packages/excalidraw/appState.ts b/packages/excalidraw/appState.ts
-index ab85060fe..920bf37ca 100644
+index 2fe4a6801..e28e364e4 100644
 --- a/packages/excalidraw/appState.ts
 +++ b/packages/excalidraw/appState.ts
-@@ -105,6 +105,7 @@ export const getDefaultAppState = (): Omit<
-     suggestedBinding: null,
+@@ -106,6 +106,7 @@ export const getDefaultAppState = (): Omit<
+     hoveredArrowTextAnchor: null,
      frameRendering: { enabled: true, clip: true, name: true, outline: true },
      frameToHighlight: null,
 +    autoLayoutDropIndicator: null,
      editingFrame: null,
      elementsToHighlight: null,
      toast: null,
-@@ -242,6 +243,7 @@ const APP_STATE_STORAGE_CONF = (<
-   suggestedBinding: { browser: false, export: false, server: false },
+@@ -247,6 +248,7 @@ const APP_STATE_STORAGE_CONF = (<
+   hoveredArrowTextAnchor: { browser: false, export: false, server: false },
    frameRendering: { browser: false, export: false, server: false },
    frameToHighlight: { browser: false, export: false, server: false },
 +  autoLayoutDropIndicator: { browser: false, export: false, server: false },
@@ -1962,10 +1962,10 @@ index ab85060fe..920bf37ca 100644
    elementsToHighlight: { browser: false, export: false, server: false },
    toast: { browser: false, export: false, server: false },
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 3e07f9254..b8908c6d8 100644
+index 2efd69137..d62e680cf 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -181,7 +181,6 @@ import {
+@@ -180,7 +180,6 @@ import {
    getFrameChildrenInsertionIndex,
    isCursorInFrame,
    addElementsToFrame,
@@ -1973,7 +1973,7 @@ index 3e07f9254..b8908c6d8 100644
    removeElementsFromFrame,
    getElementsInResizingFrame,
    getElementsInNewFrame,
-@@ -189,6 +188,7 @@ import {
+@@ -188,6 +187,7 @@ import {
    elementOverlapsWithFrame,
    updateFrameMembershipOfSelectedElements,
    isElementInFrame,
@@ -1981,7 +1981,7 @@ index 3e07f9254..b8908c6d8 100644
    getFrameLikeTitle,
    getElementsOverlappingFrame,
    filterElementsEligibleAsFrameChildren,
-@@ -259,6 +259,23 @@ import {
+@@ -258,6 +258,23 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
    isNonDeletedElement,
@@ -2016,7 +2016,7 @@ index 3e07f9254..b8908c6d8 100644
  } from "../actions/actionFrame";
  import { createRedoAction, createUndoAction } from "../actions/actionHistory";
  import { actionTextAutoResize } from "../actions/actionTextAutoResize";
-@@ -787,6 +808,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -802,6 +823,12 @@ class App extends React.Component<AppProps, AppState> {
        refreshTextElementDimensions: this.refreshTextElementDimensions,
        rerouteElbowArrow: this.rerouteElbowArrow,
        rotateSelectedElements: this.rotateSelectedElements,
@@ -2029,7 +2029,7 @@ index 3e07f9254..b8908c6d8 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -2159,8 +2186,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2169,8 +2196,16 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -2047,7 +2047,7 @@ index 3e07f9254..b8908c6d8 100644
          this.state,
        );
  
-@@ -2204,11 +2239,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2214,11 +2249,11 @@ class App extends React.Component<AppProps, AppState> {
                borderRadius: 4,
                boxShadow: "inset 0 0 0 1px var(--color-primary)",
                fontFamily: "Assistant",
@@ -2062,8 +2062,8 @@ index 3e07f9254..b8908c6d8 100644
 +              color: getFrameNameColor(f, isDarkTheme),
                overflow: "hidden",
                maxWidth: `${
-                 document.body.clientWidth - x1 - FRAME_NAME_EDIT_PADDING
-@@ -2232,29 +2267,25 @@ class App extends React.Component<AppProps, AppState> {
+                 this.ownerDocument.body.clientWidth -
+@@ -2244,29 +2279,25 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -2105,7 +2105,7 @@ index 3e07f9254..b8908c6d8 100644
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
              whiteSpace: "nowrap",
              textOverflow: "ellipsis",
-@@ -3248,6 +3279,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -3297,6 +3328,7 @@ class App extends React.Component<AppProps, AppState> {
        croppingElementId: null,
        suggestedBinding: null,
        frameToHighlight: null,
@@ -2113,7 +2113,7 @@ index 3e07f9254..b8908c6d8 100644
        elementsToHighlight: null,
        snapLines: [],
        showHyperlinkPopup: false,
-@@ -5189,6 +5221,247 @@ class App extends React.Component<AppProps, AppState> {
+@@ -5268,6 +5300,247 @@ class App extends React.Component<AppProps, AppState> {
        return rotated;
      };
  
@@ -2361,15 +2361,15 @@ index 3e07f9254..b8908c6d8 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -6163,6 +6436,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -6261,6 +6534,7 @@ class App extends React.Component<AppProps, AppState> {
            ? prevState.selectedLinearElement
            : null,
          frameToHighlight: null,
 +        autoLayoutDropIndicator: null,
-       } as const;
- 
-       if (nextActiveTool.type === "freedraw") {
-@@ -6663,12 +6937,33 @@ class App extends React.Component<AppProps, AppState> {
+         // only the text tool offers arrow-endpoint binding, and the highlight
+         // is refreshed on pointermove — don't leave a stale one behind
+         hoveredArrowTextAnchor: null,
+@@ -6771,12 +7045,33 @@ class App extends React.Component<AppProps, AppState> {
          if (containingFrame && !isNonDeletedElement(containingFrame)) {
            console.error("[NONDELETED][INVARIANT] Containing frame is deleted");
          }
@@ -2409,7 +2409,7 @@ index 3e07f9254..b8908c6d8 100644
            ? isCursorInFrame(
                { x, y },
                containingFrame as NonDeleted<ExcalidrawFrameLikeElement>,
-@@ -7618,9 +7913,26 @@ class App extends React.Component<AppProps, AppState> {
+@@ -7734,9 +8029,26 @@ class App extends React.Component<AppProps, AppState> {
  
    private updateFrameToHighlight = (
      frameToHighlight: AppState["frameToHighlight"],
@@ -2438,7 +2438,7 @@ index 3e07f9254..b8908c6d8 100644
      }
    };
  
-@@ -10868,17 +11180,42 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11036,17 +11348,42 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -2491,7 +2491,7 @@ index 3e07f9254..b8908c6d8 100644
  
          // Marking that click was used for dragging to check
          // if elements should be deselected on pointerup
-@@ -11543,6 +11880,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11725,6 +12062,7 @@ class App extends React.Component<AppProps, AppState> {
          resizingElement: null,
          selectionElement: null,
          frameToHighlight: null,
@@ -2499,7 +2499,7 @@ index 3e07f9254..b8908c6d8 100644
          elementsToHighlight: null,
          cursorButton: "up",
          snapLines: updateStable(prevState.snapLines, []),
-@@ -11944,6 +12282,17 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12128,6 +12466,17 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -2517,7 +2517,7 @@ index 3e07f9254..b8908c6d8 100644
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12046,9 +12395,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12230,9 +12579,16 @@ class App extends React.Component<AppProps, AppState> {
              topLayerFrame &&
              !this.state.selectedElementIds[topLayerFrame.id]
            ) {
@@ -2537,7 +2537,7 @@ index 3e07f9254..b8908c6d8 100644
  
              if (this.state.editingGroupId) {
                updateGroupIdsAfterEditingGroup(elementsToAdd);
-@@ -12077,6 +12433,25 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12261,6 +12617,25 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -2563,7 +2563,7 @@ index 3e07f9254..b8908c6d8 100644
            this.scene.replaceAllElements(nextElements);
          }
        }
-@@ -12095,31 +12470,13 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12279,31 +12654,13 @@ class App extends React.Component<AppProps, AppState> {
          });
        }
  
@@ -2601,7 +2601,7 @@ index 3e07f9254..b8908c6d8 100644
          this.scene.replaceAllElements(nextElements);
        }
  
-@@ -13606,29 +13963,6 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13805,29 +14162,6 @@ class App extends React.Component<AppProps, AppState> {
          pointerDownState.resize.center.y,
        )
      ) {
@@ -2631,7 +2631,7 @@ index 3e07f9254..b8908c6d8 100644
        return true;
      }
      return false;
-@@ -13704,6 +14038,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13903,6 +14237,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -2643,10 +2643,10 @@ index 3e07f9254..b8908c6d8 100644
        actionToggleCropEditor,
        CONTEXT_MENU_SEPARATOR,
 diff --git a/packages/excalidraw/components/LayerUI.tsx b/packages/excalidraw/components/LayerUI.tsx
-index 43ded1403..545ec6369 100644
+index 006e581cf..deaecf728 100644
 --- a/packages/excalidraw/components/LayerUI.tsx
 +++ b/packages/excalidraw/components/LayerUI.tsx
-@@ -676,6 +676,7 @@ const stripIrrelevantAppStateProps = (appState: AppState): UIAppState => {
+@@ -709,6 +709,7 @@ const stripIrrelevantAppStateProps = (appState: AppState): UIAppState => {
      originSnapOffset,
      suggestedBinding,
      frameToHighlight,
@@ -2655,7 +2655,7 @@ index 43ded1403..545ec6369 100644
      ...ret
    } = appState;
 diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
-index 3ecb79e4e..1269b4275 100644
+index 0583da179..861aeb8cb 100644
 --- a/packages/excalidraw/components/SearchMenu.tsx
 +++ b/packages/excalidraw/components/SearchMenu.tsx
 @@ -27,7 +27,10 @@ import {
@@ -2679,7 +2679,7 @@ index 3ecb79e4e..1269b4275 100644
              : match.element.fontSize,
            fontFamily: isFrameLikeElement(match.element)
              ? FONT_FAMILY.Assistant
-@@ -743,7 +746,7 @@ const getMatchInFrame = (
+@@ -744,7 +747,7 @@ const getMatchInFrame = (
  
    const prefixText = text.slice(0, index);
    const font = getFontString({
@@ -2688,7 +2688,7 @@ index 3ecb79e4e..1269b4275 100644
      fontFamily: FONT_FAMILY.Assistant,
    });
  
-@@ -758,8 +761,8 @@ const getMatchInFrame = (
+@@ -759,8 +762,8 @@ const getMatchInFrame = (
  
    const matchedMetrics = measureText(matchedText, font, lineHeight);
  
@@ -3125,7 +3125,7 @@ index 49b8405da..b63daf825 100644
    }
    return true;
 diff --git a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
-index 7bd1ab0fb..6ff6822dc 100644
+index ac31e4e16..dc08dec1b 100644
 --- a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
 +++ b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
 @@ -250,6 +250,7 @@ const getRelevantAppStateProps = (
@@ -3149,10 +3149,10 @@ index e46ac041b..87117c7f7 100644
      currentHoveredFontFamily: appState.currentHoveredFontFamily,
      croppingElementId: appState.croppingElementId,
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
-index cee1002c2..791e0b54b 100644
+index ad0c7d86f..b366aa44f 100644
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
-@@ -10,6 +10,7 @@ import {
+@@ -12,6 +12,7 @@ import {
    ROUNDNESS,
    DEFAULT_SIDEBAR,
    DEFAULT_ELEMENT_PROPS,
@@ -3160,7 +3160,7 @@ index cee1002c2..791e0b54b 100644
    DEFAULT_GRID_SIZE,
    DEFAULT_GRID_STEP,
    randomId,
-@@ -715,6 +716,26 @@ export const restoreElement = (
+@@ -722,6 +723,26 @@ export const restoreElement = (
      case "frame":
        return restoreElementWithProperties(element, {
          name: element.name ?? null,
@@ -3188,10 +3188,10 @@ index cee1002c2..791e0b54b 100644
  
      // Don't use default case so as to catch a missing an element type case.
 diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
-index 512f0d503..a9c456728 100644
+index 4a6fa1de4..51ccda237 100644
 --- a/packages/excalidraw/locales/en.json
 +++ b/packages/excalidraw/locales/en.json
-@@ -167,8 +167,8 @@
+@@ -170,8 +170,8 @@
      },
      "statusPublished": "Published",
      "sidebarLock": "Keep sidebar open",
@@ -3202,7 +3202,7 @@ index 512f0d503..a9c456728 100644
      "eyeDropper": "Pick color from canvas",
      "textToDiagram": "Text to diagram",
      "prompt": "Prompt",
-@@ -183,7 +183,12 @@
+@@ -186,7 +186,12 @@
      "unCroppedDimension": "Uncropped dimension",
      "copyElementLink": "Copy link to object",
      "linkToElement": "Link to object",
@@ -3216,7 +3216,7 @@ index 512f0d503..a9c456728 100644
      "tab": "Tab",
      "shapeSwitch": "Switch shape",
      "preferences": "Preferences",
-@@ -216,7 +221,7 @@
+@@ -219,7 +224,7 @@
      "singleResult": "result",
      "multipleResults": "results",
      "placeholder": "Find text on canvas...",
@@ -3225,7 +3225,7 @@ index 512f0d503..a9c456728 100644
      "texts": "Texts"
    },
    "buttons": {
-@@ -327,7 +332,7 @@
+@@ -330,7 +335,7 @@
      "penMode": "Pen mode - prevent touch",
      "link": "Add / Update link for a selected shape",
      "eraser": "Eraser",
@@ -3234,7 +3234,7 @@ index 512f0d503..a9c456728 100644
      "magicframe": "Wireframe to code",
      "embeddable": "Web Embed",
      "laser": "Laser pointer",
-@@ -347,7 +352,7 @@
+@@ -355,7 +360,7 @@
      "text": "Text",
      "image": "Image",
      "group": "Group",
@@ -3244,7 +3244,7 @@ index 512f0d503..a9c456728 100644
      "embeddable": "Web Embed",
      "selection": "Selection",
 diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
-index 06a4f094b..c3e1d0f00 100644
+index 03a3de79f..9816018fa 100644
 --- a/packages/excalidraw/renderer/interactiveScene.ts
 +++ b/packages/excalidraw/renderer/interactiveScene.ts
 @@ -41,6 +41,7 @@ import {
@@ -3255,7 +3255,7 @@ index 06a4f094b..c3e1d0f00 100644
    LinearElementEditor,
    getActiveTextElement,
    getElementsInGroup,
-@@ -1041,6 +1042,27 @@ const renderFrameHighlight = (
+@@ -1059,6 +1060,27 @@ const renderFrameHighlight = (
    context.restore();
  };
  
@@ -3283,7 +3283,7 @@ index 06a4f094b..c3e1d0f00 100644
  const renderElementsBoxHighlight = (
    context: CanvasRenderingContext2D,
    appState: InteractiveCanvasAppState,
-@@ -1640,7 +1662,11 @@ const _renderInteractiveScene = ({
+@@ -1659,7 +1681,11 @@ const _renderInteractiveScene = ({
  
    const activeTextElement = getActiveTextElement(selectedElements, appState);
  
@@ -3296,17 +3296,15 @@ index 06a4f094b..c3e1d0f00 100644
      renderResetAutoResizeHandle(
        activeTextElement,
        context,
-@@ -1727,8 +1753,9 @@ const _renderInteractiveScene = ({
-   if (appState.frameToHighlight) {
-     renderFrameHighlight(
-       context,
-       appState,
+@@ -1754,6 +1780,7 @@ const _renderInteractiveScene = ({
        appState.frameToHighlight,
        elementsMap,
      );
 +    renderAutoLayoutDropIndicator(context, appState);
    }
-@@ -1866,7 +1893,8 @@ const _renderInteractiveScene = ({
+
+   if (appState.elementsToHighlight) {
+@@ -1889,7 +1916,8 @@ const _renderInteractiveScene = ({
            // local user
            if (
              locallySelectedIds.has(element.id) &&
@@ -3316,7 +3314,7 @@ index 06a4f094b..c3e1d0f00 100644
            ) {
              selectionColors.push(
                renderConfig.getSelectionColorForElement?.(
-@@ -1969,6 +1997,8 @@ const _renderInteractiveScene = ({
+@@ -1992,6 +2020,8 @@ const _renderInteractiveScene = ({
        if (
          !appState.viewModeEnabled &&
          showBoundingBox &&
@@ -3659,10 +3657,10 @@ index 4da68316d..1afe9567f 100644
    // a few tests with exportToCanvas (where we can't inspect elements)
    // ---------------------------------------------------------------------------
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 9a4dc372c..b1977c97c 100644
+index b13334bf7..e2050530b 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -44,6 +44,10 @@ import type {
+@@ -45,6 +45,10 @@ import type {
    ValueOf,
    MakeBrand,
  } from "@excalidraw/common/utility-types";
@@ -3673,7 +3671,7 @@ index 9a4dc372c..b1977c97c 100644
  
  import type {
    CaptureUpdateActionType,
-@@ -194,6 +198,7 @@ type _CommonCanvasAppState = {
+@@ -196,6 +200,7 @@ type _CommonCanvasAppState = {
    editingGroupId: AppState["editingGroupId"]; // TODO: move to interactive canvas if possible
    selectedElementIds: AppState["selectedElementIds"]; // TODO: move to interactive canvas if possible
    frameToHighlight: AppState["frameToHighlight"]; // TODO: move to interactive canvas if possible
@@ -3681,16 +3679,16 @@ index 9a4dc372c..b1977c97c 100644
    offsetLeft: AppState["offsetLeft"];
    offsetTop: AppState["offsetTop"];
    theme: AppState["theme"];
-@@ -233,6 +238,7 @@ export type InteractiveCanvasAppState = Readonly<
-     suggestedBinding: AppState["suggestedBinding"];
+@@ -236,6 +241,7 @@ export type InteractiveCanvasAppState = Readonly<
+     hoveredArrowTextAnchor: AppState["hoveredArrowTextAnchor"];
      isRotating: AppState["isRotating"];
      elementsToHighlight: AppState["elementsToHighlight"];
 +    autoLayoutDropIndicator: AppState["autoLayoutDropIndicator"];
      // Collaborators
      collaborators: AppState["collaborators"];
      // SnapLines
-@@ -366,6 +372,12 @@ export interface AppState {
-     midPoint?: GlobalPoint;
+@@ -378,6 +384,12 @@ export interface AppState {
+     anchor: "start" | "end" | "label";
    } | null;
    frameToHighlight: NonDeleted<ExcalidrawFrameLikeElement> | null;
 +  autoLayoutDropIndicator: {
@@ -3702,15 +3700,15 @@ index 9a4dc372c..b1977c97c 100644
    frameRendering: {
      enabled: boolean;
      name: boolean;
-@@ -559,6 +571,7 @@ export type UIAppState = Omit<
-   | "originSnapOffset"
+@@ -579,6 +591,7 @@ export type UIAppState = Omit<
    | "suggestedBinding"
+   | "hoveredArrowTextAnchor"
    | "frameToHighlight"
 +  | "autoLayoutDropIndicator"
    | "elementsToHighlight"
  >;
  
-@@ -1100,6 +1113,8 @@ export type AppClassProperties = {
+@@ -1172,6 +1185,8 @@ export type AppClassProperties = {
  
    setAppState: App["setAppState"];
  
@@ -3719,7 +3717,7 @@ index 9a4dc372c..b1977c97c 100644
    isInteractionEnabled: App["isInteractionEnabled"];
    isNavigationEnabled: App["isNavigationEnabled"];
  };
-@@ -1197,6 +1212,35 @@ export type ExcalidrawImperativeAPIEventMap = {
+@@ -1269,6 +1284,35 @@ export type ExcalidrawImperativeAPIEventMap = {
    "editor:unmount": [];
  };
  
@@ -3755,7 +3753,7 @@ index 9a4dc372c..b1977c97c 100644
  export interface ExcalidrawImperativeAPI {
    /** Whether the editor has been unmounted and the API is no longer usable. */
    isDestroyed: boolean;
-@@ -1241,6 +1285,82 @@ export interface ExcalidrawImperativeAPI {
+@@ -1313,6 +1357,82 @@ export interface ExcalidrawImperativeAPI {
    ) => boolean;
    refreshTextElementDimensions: (elementIds?: string | string[]) => boolean;
    rerouteElbowArrow: (elementId: string) => boolean;

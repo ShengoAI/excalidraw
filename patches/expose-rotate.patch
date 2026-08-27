@@ -49,13 +49,8 @@ index 0e573219f..8832af15f 100644
        onScrollChange: (cb) => this.onScrollChangeEmitter.on(cb),
        onUserFollow: (cb) => this.onUserFollowEmitter.on(cb),
        onStateChange: this.onStateChange,
-@@ -2611,20 +2616,26 @@ class App extends React.Component<AppProps, AppState> {
-                             selectedElements={selectedElements}
-                             canvasNonce={canvasNonce}
-                             selectionNonce={
-                               this.state.selectionElement?.versionNonce
-                             }
-                             scale={window.devicePixelRatio}
+@@ -2643,7 +2648,13 @@ class App extends React.Component<AppProps, AppState> {
+                             scale={this.ownerWindow.devicePixelRatio}
                              appState={this.state}
                              renderScrollbars={
                                this.props.renderScrollbars === true
@@ -68,14 +63,6 @@ index 0e573219f..8832af15f 100644
 +                            }
                              editorInterface={this.editorInterface}
                              interactionEnabled={this.isInteractionEnabled()}
-                             navigationEnabled={this.isNavigationEnabled()}
-                             renderInteractiveSceneCallback={
-                               this.renderInteractiveSceneCallback
-                             }
-                             handleCanvasRef={this.handleInteractiveCanvasRef}
-                             onContextMenu={this.handleCanvasContextMenu}
-                             onClick={this.handleCanvasClick}
-                             onPointerMove={this.handleCanvasPointerMove}
 @@ -5126,20 +5137,168 @@ class App extends React.Component<AppProps, AppState> {
      (files) => {
        const { addedFiles } = this.addMissingFiles(files);
@@ -323,52 +310,24 @@ diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
 index 240743cb4..58c098771 100644
 --- a/packages/excalidraw/index.tsx
 +++ b/packages/excalidraw/index.tsx
-@@ -102,20 +102,22 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
-     onPointerDown,
-     onPointerUp,
-     onScrollChange,
-     onDuplicate,
-     children,
-     validateEmbeddable,
-     renderEmbeddable,
+@@ -113,7 +113,9 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
      aiEnabled,
      showDeprecatedFonts,
      renderScrollbars,
 +    getSelectionColorForElement,
 +    hideDefaultRotateHandle,
+     viewportStatusFrame,
+     currentUserControls,
      imageOptions,
    } = props;
- 
-   const canvasActions = props.UIOptions?.canvasActions;
- 
-   // FIXME normalize/set defaults in parent component so that the memo resolver
-   // compares the same values
-   const UIOptions: AppProps["UIOptions"] = {
-     ...props.UIOptions,
-     canvasActions: {
-@@ -238,20 +240,22 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
-           generateLinkForSelection={generateLinkForSelection}
-           onPointerDown={onPointerDown}
-           onPointerUp={onPointerUp}
-           onScrollChange={onScrollChange}
-           onDuplicate={onDuplicate}
-           validateEmbeddable={validateEmbeddable}
-           renderEmbeddable={renderEmbeddable}
-           aiEnabled={aiEnabled !== false}
+@@ -256,5 +258,7 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 +          getSelectionColorForElement={getSelectionColorForElement}
 +          hideDefaultRotateHandle={hideDefaultRotateHandle}
+           viewportStatusFrame={viewportStatusFrame}
+           currentUserControls={currentUserControls}
            imageOptions={normalizedImageOptions}
-         >
-           {children}
-         </App>
-       </InitializeApp>
-     </EditorJotaiProvider>
-   );
- };
- 
- const areEqual = (prevProps: ExcalidrawProps, nextProps: ExcalidrawProps) => {
 diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
 index 31a6ca888..06a4f094b 100644
 --- a/packages/excalidraw/renderer/interactiveScene.ts
@@ -679,16 +638,7 @@ index 3162e5903..15768b78a 100644
  import type { SnapLine } from "./snapping";
  import type { ImportedDataState } from "./data/types";
  import type { SetViewportOptions } from "./viewport";
-@@ -914,20 +915,26 @@ export interface ExcalidrawProps {
-     | string[]
-     | RegExp
-     | RegExp[]
-     | ((link: string) => boolean | undefined);
-   renderEmbeddable?: (
-     element: NonDeleted<ExcalidrawEmbeddableElement>,
-     appState: AppState,
-   ) => JSX.Element | null;
-   aiEnabled?: boolean;
+@@ -972,4 +973,10 @@ export interface ExcalidrawProps {
    showDeprecatedFonts?: boolean;
 +  hideDefaultRotateHandle?: boolean;
 +  getSelectionColorForElement?: (
@@ -697,15 +647,8 @@ index 3162e5903..15768b78a 100644
 +    appState: InteractiveCanvasAppState,
 +  ) => string | null | undefined;
    renderScrollbars?: boolean;
+   viewportStatusFrame?: ViewportStatusFrame | null;
    /**
-    * Called before exporting to a file.
-    *
-    * Allows the host app to intercept and delay saving until async operations
-    * (e.g., images are loaded) complete.
-    *
-    * If Promise/AsyncGenerator is returned, a progress toast will be shown
-    * until the operation completes. Generator can yield progress updates.
-    */
 @@ -1211,20 +1218,33 @@ export interface ExcalidrawImperativeAPI {
    setViewport: InstanceType<typeof App>["viewport"]["setViewport"];
    getViewportOffsets: InstanceType<typeof App>["viewport"]["getOffsets"];

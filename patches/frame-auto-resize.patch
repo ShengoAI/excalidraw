@@ -295,8 +295,8 @@ index bc2cdf285..dc49eece4 100644
  };
  
 +/**
-+ * Nested frames are added only when the moving frame is strictly smaller and
-+ * fully inside the target. Mere overlap or touching must not nest them.
++ * Nested frames are added only when the moving frame is same size or smaller
++ * and fully inside the target. Mere overlap or touching must not nest them.
 + */
 +export const isFrameFullyContainedByFrame = (
 +  inner: ExcalidrawFrameLikeElement,
@@ -321,8 +321,8 @@ index bc2cdf285..dc49eece4 100644
 +  const outerHeight = outerY2 - outerY1;
 +
 +  return (
-+    innerWidth < outerWidth &&
-+    innerHeight < outerHeight &&
++    innerWidth <= outerWidth &&
++    innerHeight <= outerHeight &&
 +    outerX1 <= innerX1 &&
 +    outerY1 <= innerY1 &&
 +    outerX2 >= innerX2 &&

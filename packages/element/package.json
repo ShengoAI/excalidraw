@@ -1,5 +1,5 @@
 {
-  "name": "@albertBuenaventura/element",
+  "name": "@ShengoAI/element",
   "version": "0.18.0-alpha.16",
   "type": "module",
   "types": "./dist/types/element/src/index.d.ts",
@@ -63,8 +63,8 @@
     "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
   },
   "dependencies": {
-    "@albertBuenaventura/common": "0.18.0-alpha.16",
-    "@albertBuenaventura/math": "0.18.0-alpha.16",
-    "@albertBuenaventura/fractional-indexing": "3.3.0"
+    "@ShengoAI/common": "0.18.0-alpha.16",
+    "@ShengoAI/math": "0.18.0-alpha.16",
+    "@ShengoAI/fractional-indexing": "3.3.0"
   }
 }

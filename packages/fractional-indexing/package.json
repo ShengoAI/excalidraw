@@ -1,5 +1,5 @@
 {
-  "name": "@albertBuenaventura/fractional-indexing",
+  "name": "@ShengoAI/fractional-indexing",
   "version": "3.3.0",
   "description": "Provides functions for generating ordering strings",
   "type": "module",

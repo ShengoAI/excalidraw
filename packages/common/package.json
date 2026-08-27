@@ -1,5 +1,5 @@
 {
-  "name": "@albertBuenaventura/common",
+  "name": "@ShengoAI/common",
   "version": "0.18.0-alpha.16",
   "type": "module",
   "types": "./dist/types/common/src/index.d.ts",

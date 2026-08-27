@@ -27,10 +27,10 @@ index 55bbf967c..b529d6cd0 100644
      ) {
        candidateElements.push(element);
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index 7c00efdbe..ed94d19bc 100644
+index de10b277e..1efeff5aa 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -34,6 +34,7 @@ import { mutateElement } from "./mutateElement";
+@@ -35,6 +35,7 @@ import { updateBoundElements } from "./binding";
  import { getBoundTextElement, getContainerElement } from "./textElement";
  import { syncMovedIndices } from "./fractionalIndex";
  import {
@@ -38,7 +38,7 @@ index 7c00efdbe..ed94d19bc 100644
    isFrameElement,
    isFrameLikeElement,
    isTextElement,
-@@ -734,7 +735,11 @@ export const collectAutoLayoutItems = (
+@@ -737,7 +738,11 @@ export const collectAutoLayoutItems = (
    const order: string[] = [];
  
    for (const element of elements) {
@@ -52,7 +52,7 @@ index 7c00efdbe..ed94d19bc 100644
      }
      if (opts?.excludeIds?.has(element.id)) {
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index f944ca9f9..93e47d0ba 100644
+index 8c460b434..11f8186dd 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -76,6 +76,7 @@ export type ElementConstructorOpts = MarkOptional<
@@ -134,7 +134,7 @@ index 9b8d5a0e6..27561bdd4 100644
    return !!element.startBinding || !!element.endBinding;
  };
 diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
-index 10b0b34ca..df52eb329 100644
+index 10b0b34ca..80eb46b2a 100644
 --- a/packages/element/src/types.ts
 +++ b/packages/element/src/types.ts
 @@ -75,6 +75,8 @@ type _ExcalidrawElementBase = Readonly<{
@@ -147,10 +147,10 @@ index 10b0b34ca..df52eb329 100644
        Ordered from deepest to shallowest. */
    groupIds: readonly GroupId[];
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index d32059416..0cc9dc76e 100644
+index 239ebd59a..274d9724a 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -146,6 +146,7 @@ import {
+@@ -145,6 +145,7 @@ import {
    isBindingElement,
    isBindingElementType,
    isBoundToContainer,
@@ -158,7 +158,7 @@ index d32059416..0cc9dc76e 100644
    isFrameLikeElement,
    isImageElement,
    isEmbeddableElement,
-@@ -831,6 +832,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -847,6 +848,7 @@ class App extends React.Component<AppProps, AppState> {
        getFrameLayout: this.getFrameLayout,
        toggleFrameClip: this.toggleFrameClip,
        setFrameCollapsed: this.setFrameCollapsed,
@@ -166,9 +166,9 @@ index d32059416..0cc9dc76e 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -5822,6 +5824,69 @@ class App extends React.Component<AppProps, AppState> {
-     return true;
-   };
+@@ -5885,6 +5887,69 @@ class App extends React.Component<AppProps, AppState> {
+       return rotated;
+     };
  
 +  public setElementsHidden: ExcalidrawImperativeAPI["setElementsHidden"] = (
 +    ids,
@@ -236,7 +236,7 @@ index d32059416..0cc9dc76e 100644
    public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
      (elementId, opts = {}) => {
        if (elementId === null) {
-@@ -7322,9 +7387,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -7414,9 +7479,11 @@ class App extends React.Component<AppProps, AppState> {
                (element) =>
                  (opts?.includeLockedElements || !element.locked) &&
                  (opts?.includeBoundTextElement ||
@@ -250,7 +250,7 @@ index d32059416..0cc9dc76e 100644
        .filter((element) => {
          // hitting a frame's element from outside the frame is not considered a hit
 diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
-index 1269b4275..406ad8196 100644
+index 861aeb8cb..725a5e6e6 100644
 --- a/packages/excalidraw/components/SearchMenu.tsx
 +++ b/packages/excalidraw/components/SearchMenu.tsx
 @@ -25,7 +25,7 @@ import {
@@ -262,7 +262,7 @@ index 1269b4275..406ad8196 100644
  
  import {
    getDefaultFrameName,
-@@ -792,12 +792,13 @@ const handleSearch = debounce(
+@@ -793,12 +793,13 @@ const handleSearch = debounce(
      }
  
      const elements = app.scene.getNonDeletedElements();
@@ -281,10 +281,10 @@ index 1269b4275..406ad8196 100644
  
      texts.sort((a, b) => a.y - b.y);
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
-index ef4804fde..f477881ec 100644
+index 9a1808f25..e37217bab 100644
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
-@@ -434,6 +434,7 @@ const restoreElementWithProperties = <
+@@ -441,6 +441,7 @@ const restoreElementWithProperties = <
      versionNonce: element.versionNonce ?? 0,
      index: element.index ?? null,
      isDeleted: element.isDeleted ?? false,
@@ -321,7 +321,7 @@ index fdcee2a68..2d0ef1efe 100644
        // we don't want to render text element that's being currently edited
        // (it's rendered on remote only)
 diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
-index 457de28ae..f90adc8da 100644
+index 079a593bb..194fae094 100644
 --- a/packages/excalidraw/scene/export.ts
 +++ b/packages/excalidraw/scene/export.ts
 @@ -15,7 +15,7 @@ import {
@@ -333,7 +333,7 @@ index 457de28ae..f90adc8da 100644
  
  import {
    getInitializedImageElements,
-@@ -170,19 +170,23 @@ const prepareElementsForRender = ({
+@@ -168,19 +168,23 @@ const prepareElementsForRender = ({
    exportWithDarkMode: AppState["exportWithDarkMode"];
  }) => {
    let nextElements: readonly NonDeletedExcalidrawElement[];
@@ -362,13 +362,13 @@ index 457de28ae..f90adc8da 100644
  
    return nextElements;
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index 51048727a..9a2aef533 100644
+index e1a48e2fc..69075706d 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
-@@ -1405,6 +1405,17 @@ export interface ExcalidrawImperativeAPI {
-     frameId: string,
-     collapsed?: boolean,
-   ) => boolean;
+@@ -1430,6 +1430,17 @@ export interface ExcalidrawImperativeAPI {
+   getFrameLayout: (frameId: string) => FrameLayoutSettings | null;
+   toggleFrameClip: (frameId: string, clip?: boolean) => boolean;
+   setFrameCollapsed: (frameId: string, collapsed?: boolean) => boolean;
 +  /**
 +   * Hides or shows scene elements. Hidden elements stay in the frame,
 +   * are skipped when rendering and hit-testing, and are omitted from

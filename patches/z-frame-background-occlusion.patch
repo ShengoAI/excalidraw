@@ -1,8 +1,8 @@
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index cb0c2ba32..fc72aa6ba 100644
+index ea9c60f87..2059d156c 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
-@@ -167,73 +167,49 @@ export const frameClip = (
+@@ -162,75 +161,45 @@ export const frameClip = (
  };
  
  /**
@@ -44,7 +44,9 @@ index cb0c2ba32..fc72aa6ba 100644
 -      const depthA = getAncestorFrames(a, elementsMap).length;
 -      const depthB = getAncestorFrames(b, elementsMap).length;
 -
--      return depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!;
+-      return (
+-        depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!
+-      );
 -    });
  
 -  // Render parent frame backgrounds before nested frame backgrounds.
@@ -56,12 +58,10 @@ index cb0c2ba32..fc72aa6ba 100644
 -      appState.scrollX,
 -      appState.scrollY,
 -    );
-+  // Apply element opacity
-+  context.globalAlpha = element.opacity / 100;
- 
+-
 -    // Apply element opacity
 -    context.globalAlpha = element.opacity / 100;
-+  // Apply background color
++  context.globalAlpha = element.opacity / 100;
 +  context.fillStyle = applyDarkModeFilter(
 +    element.backgroundColor,
 +    appState.theme === THEME.DARK,
@@ -71,7 +71,6 @@ index cb0c2ba32..fc72aa6ba 100644
 -    context.fillStyle = applyDarkModeFilter(
 -      element.backgroundColor,
 -      appState.theme === THEME.DARK,
-+  // Draw the background with rounded corners
 +  if (FRAME_STYLE.radius && context.roundRect) {
 +    context.beginPath();
 +    context.roundRect(
@@ -109,7 +108,7 @@ index cb0c2ba32..fc72aa6ba 100644
  };
  
  type LinkIconCanvas = HTMLCanvasElement & { zoom: number };
-@@ -384,10 +360,6 @@ const _renderStaticScene = ({
+@@ -381,10 +350,6 @@ const _renderStaticScene = ({
  
    const inFrameGroupsMap = new Map<string, boolean>();
  
@@ -120,7 +119,7 @@ index cb0c2ba32..fc72aa6ba 100644
    // Paint visible elements
    visibleElements
      .filter((el) => !isIframeLikeElement(el))
-@@ -406,6 +378,17 @@ const _renderStaticScene = ({
+@@ -403,6 +368,17 @@ const _renderStaticScene = ({
  
          context.save();
  

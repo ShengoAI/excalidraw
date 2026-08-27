@@ -53,7 +53,7 @@ index b0e351b9e..c4f588a31 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index dc49eece4..7c00efdbe 100644
+index 8d7f754b5..de10b277e 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -2,6 +2,8 @@ import {
@@ -65,7 +65,7 @@ index dc49eece4..7c00efdbe 100644
  } from "@excalidraw/common";
  import {
    isPointWithinBounds,
-@@ -153,8 +155,12 @@ const alignmentOffset = (
+@@ -153,8 +155,12 @@ const alignmentOffset = (align: "start" | "center" | "end", extra: number) => {
    return 0;
  };
  // Title block height (nameInsetY 12 + nameFontSize * nameLineHeight 17.5 = 29.5).
@@ -118,21 +118,8 @@ index dc49eece4..7c00efdbe 100644
    const contentFrameWidth = contentWidth + padding.horizontal * 2;
    const contentFrameHeight =
      contentHeight + titleHeight + padding.vertical + bottomReserve;
-diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index 9011f6c06..8c460b434 100644
---- a/packages/element/src/newElement.ts
-+++ b/packages/element/src/newElement.ts
-@@ -277,7 +277,7 @@ export const newMagicFrameElement = (
-   );
- 
-   return frameElement;
--}
-+};
- 
- /**
-  * The point of the text box its alignment pins, as ratios of width/height.
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index aaf5afa47..96d58c1a0 100644
+index 29e4f7c20..239ebd59a 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,9 @@ import {
@@ -162,7 +149,7 @@ index aaf5afa47..96d58c1a0 100644
    getCollapsedFrameHeight,
    getAutoLayoutDropIndicator,
    positionAutoLayoutDrop,
-@@ -687,6 +693,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -688,6 +694,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -179,15 +166,12 @@ index aaf5afa47..96d58c1a0 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2197,17 +2213,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2198,14 +2214,12 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
 -      const [titleSceneX, titleSceneY] = pointRotateRads(
--        pointFrom(
--          f.x + FRAME_STYLE.nameInsetX,
--          f.y + FRAME_STYLE.nameInsetY,
--        ),
+-        pointFrom(f.x + FRAME_STYLE.nameInsetX, f.y + FRAME_STYLE.nameInsetY),
 -        pointFrom(f.x + f.width / 2, f.y + f.height / 2),
 -        f.angle,
 -      );
@@ -203,7 +187,7 @@ index aaf5afa47..96d58c1a0 100644
        );
  
        const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2256,6 +2267,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2252,6 +2266,10 @@ class App extends React.Component<AppProps, AppState> {
                transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
                color: getFrameNameColor(f, isDarkTheme),
                overflow: "hidden",
@@ -214,7 +198,7 @@ index aaf5afa47..96d58c1a0 100644
                maxWidth: `${
                  this.ownerDocument.body.clientWidth -
                  x1 -
-@@ -2280,7 +2295,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2276,7 +2294,8 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -224,7 +208,7 @@ index aaf5afa47..96d58c1a0 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2289,14 +2305,30 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2285,13 +2304,31 @@ class App extends React.Component<AppProps, AppState> {
              fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
              color: getFrameNameColor(f, isDarkTheme),
              lineHeight: FRAME_STYLE.nameLineHeight,
@@ -246,18 +230,20 @@ index aaf5afa47..96d58c1a0 100644
                focusedSearchMatch?.id === f.id && focusedSearchMatch?.focus
                  ? "none"
                  : `${
-                     Math.max(
-                       0,
--                      f.width - FRAME_STYLE.nameInsetX * 2,
+-                    Math.max(0, f.width - FRAME_STYLE.nameInsetX * 2) *
+-                    this.state.zoom.value
++                    Math.max(
++                      0,
 +                      f.width -
 +                        FRAME_STYLE.nameInsetX * 2 -
 +                        topLeftWidth -
 +                        titleGap -
 +                        topRightWidth,
-                     ) * this.state.zoom.value
++                    ) * this.state.zoom.value
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-@@ -2322,6 +2354,332 @@ class App extends React.Component<AppProps, AppState> {
+             whiteSpace: "nowrap",
+@@ -2316,6 +2353,332 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -590,7 +576,7 @@ index aaf5afa47..96d58c1a0 100644
    private toggleOverscrollBehavior = (event: React.PointerEvent) => {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2711,6 +3069,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2705,6 +3068,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}
@@ -637,7 +623,7 @@ index 6bfb0ad6f..a0182544b 100644
            showDeprecatedFonts={showDeprecatedFonts}
            renderScrollbars={renderScrollbars}
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index b1d17c4c8..f928c93b9 100644
+index 206a192ab..e1a48e2fc 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
 @@ -38,6 +38,8 @@ import type {
@@ -706,12 +692,3 @@ index b1d17c4c8..f928c93b9 100644
    aiEnabled?: boolean;
    showDeprecatedFonts?: boolean;
    hideDefaultRotateHandle?: boolean;
-@@ -1431,7 +1468,7 @@ export interface ExcalidrawImperativeAPI {
-     clip?: boolean,
-   ) => boolean;
-   /**
--   * Collapses a frame to its title/top chrome header, or expands it back.
-+   * Collapses a frame to its title/top-chrome header, or expands it back.
-    * Children stay members and are clipped while collapsed.
-    * @param frameId - The ID of the frame to update
-    * @param collapsed - Optional explicit value. If not provided, toggles.

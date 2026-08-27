@@ -90,7 +90,7 @@ index 8cb9af38e..01123de51 100644
  
    const origElements: ExcalidrawElement[] = [];
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index bc2cdf285..dc49eece4 100644
+index bc2cdf285..8d7f754b5 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -1,4 +1,8 @@
@@ -103,7 +103,23 @@ index bc2cdf285..dc49eece4 100644
  import {
    isPointWithinBounds,
    pointFrom,
-@@ -42,10 +46,170 @@ import type {
+@@ -25,6 +29,7 @@ import {
+   boundsContainBounds,
+ } from "./bounds";
+ import { mutateElement } from "./mutateElement";
++import { updateBoundElements } from "./binding";
+ import { getBoundTextElement, getContainerElement } from "./textElement";
+ import { syncMovedIndices } from "./fractionalIndex";
+ import {
+@@ -35,17 +40,176 @@ import {
+ 
+ import { getNonDeletedElements } from ".";
+ 
+-import type { ExcalidrawElementsIncludingDeleted } from "./Scene";
++import type { ExcalidrawElementsIncludingDeleted, Scene } from "./Scene";
+ 
+ import type {
+   ElementsMap,
    ElementsMapOrArray,
    ExcalidrawElement,
    ExcalidrawFrameLikeElement,
@@ -121,8 +137,7 @@ index bc2cdf285..dc49eece4 100644
 +  horizontal: true,
 +  vertical: true,
 +};
-+export const DEFAULT_FRAME_AUTO_LAYOUT_ALIGN: FrameAutoLayoutAlign =
-+  "top-left";
++export const DEFAULT_FRAME_AUTO_LAYOUT_ALIGN: FrameAutoLayoutAlign = "top-left";
 +
 +/** Defaults applied only when converting a free-layout container to auto-layout. */
 +export const FRAME_AUTO_LAYOUT_CONVERSION_PADDING = 10;
@@ -158,7 +173,10 @@ index bc2cdf285..dc49eece4 100644
 +
 +const ALIGN_AXES: Record<
 +  FrameAutoLayoutAlign,
-+  { horizontal: "start" | "center" | "end"; vertical: "start" | "center" | "end" }
++  {
++    horizontal: "start" | "center" | "end";
++    vertical: "start" | "center" | "end";
++  }
 +> = {
 +  "top-left": { horizontal: "start", vertical: "start" },
 +  "top-center": { horizontal: "center", vertical: "start" },
@@ -198,10 +216,7 @@ index bc2cdf285..dc49eece4 100644
 +  };
 +};
 +
-+const alignmentOffset = (
-+  align: "start" | "center" | "end",
-+  extra: number,
-+) => {
++const alignmentOffset = (align: "start" | "center" | "end", extra: number) => {
 +  if (extra <= 0) {
 +    return 0;
 +  }
@@ -346,7 +361,7 @@ index bc2cdf285..dc49eece4 100644
  export const getElementsInResizingFrame = (
    allElements: ExcalidrawElementsIncludingDeleted,
    frame: ExcalidrawFrameLikeElement,
-@@ -444,6 +650,509 @@ export const getContainingFrame = (
+@@ -444,6 +650,523 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -430,10 +445,7 @@ index bc2cdf285..dc49eece4 100644
 +    if (opts?.excludeIds?.has(element.id)) {
 +      continue;
 +    }
-+    const key = getAutoLayoutClusterKey(
-+      element,
-+      opts?.editingGroupId ?? null,
-+    );
++    const key = getAutoLayoutClusterKey(element, opts?.editingGroupId ?? null);
 +    let cluster = clusters.get(key);
 +    if (!cluster) {
 +      cluster = [];
@@ -680,7 +692,8 @@ index bc2cdf285..dc49eece4 100644
 +    if (index <= 0) {
 +      const first = remaining[0];
 +      const firstStart = frame.autoLayout === "vertical" ? first.y1 : first.x1;
-+      targetStart = firstStart - itemSize - 1 - (droppedItems.length - 1 - offset);
++      targetStart =
++        firstStart - itemSize - 1 - (droppedItems.length - 1 - offset);
 +    } else if (index >= remaining.length) {
 +      const last = remaining[remaining.length - 1];
 +      const lastEnd = frame.autoLayout === "vertical" ? last.y2 : last.x2;
@@ -729,8 +742,7 @@ index bc2cdf285..dc49eece4 100644
 +      frame.autoLayoutPadding?.vertical ??
 +      DEFAULT_FRAME_CONTENT_PADDING_Y,
 +  };
-+  const gap =
-+    opts.gap ?? frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
++  const gap = opts.gap ?? frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
 +  const hug = opts.hug ?? getFrameAutoLayoutHug(frame);
 +  const align = opts.align ?? getFrameAutoLayoutAlign(frame);
 +  const axes = ALIGN_AXES[align] ?? ALIGN_AXES["top-left"];
@@ -853,10 +865,27 @@ index bc2cdf285..dc49eece4 100644
 +  return didLayout;
 +};
 +
++/**
++ * Recomputes arrows bound to children moved by auto-layout.
++ *
++ * Call this after the laid-out elements have been installed in `scene`, so
++ * binding calculations read the final positions of both endpoints.
++ */
++export const updateBoundElementsAfterAutoLayout = (scene: Scene) => {
++  const elementsMap = scene.getNonDeletedElementsMap();
++
++  for (const element of scene.getNonDeletedElements()) {
++    const frame = element.frameId ? elementsMap.get(element.frameId) : null;
++    if (frame && isFrameLikeElement(frame) && frame.autoLayout) {
++      updateBoundElements(element, scene);
++    }
++  }
++};
++
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +1174,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +1189,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -875,7 +904,7 @@ index bc2cdf285..dc49eece4 100644
        continue;
      }
  
-@@ -481,7 +1191,9 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -481,7 +1206,9 @@ export const filterElementsEligibleAsFrameChildren = (
          const groupElements = getElementsInGroup(elements, shallowestGroupId);
          if (
            groupElements.some((el) =>
@@ -886,7 +915,7 @@ index bc2cdf285..dc49eece4 100644
            )
          ) {
            for (const child of groupElements) {
-@@ -490,7 +1202,9 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -490,7 +1217,9 @@ export const filterElementsEligibleAsFrameChildren = (
          }
        }
      } else {
@@ -897,7 +926,7 @@ index bc2cdf285..dc49eece4 100644
        if (overlaps) {
          eligibleElements.push(element);
        }
-@@ -521,7 +1235,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+@@ -521,7 +1250,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
  export const getFrameChildrenInsertionIndex = (
    elements: readonly ExcalidrawElement[],
    frameId: ExcalidrawFrameLikeElement["id"],
@@ -921,7 +950,7 @@ index bc2cdf285..dc49eece4 100644
    for (let index = elements.length - 1; index >= 0; index--) {
      const element = elements[index];
  
-@@ -566,11 +1296,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +1311,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -940,7 +969,7 @@ index bc2cdf285..dc49eece4 100644
        continue;
      }
  
-@@ -610,9 +1342,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -610,9 +1357,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
    const otherElements = Array.from(allElements.values()).filter(
      (element) => !finalElementsToAdd.has(element),
    );
@@ -954,16 +983,17 @@ index bc2cdf285..dc49eece4 100644
    );
  
    if (insertionIndex === null) {
-@@ -725,11 +1461,21 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,11 +1476,18 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
-+    // Check if element (including nested frames) should be removed from its parent frame
-     if (
-       element.frameId &&
+-    if (
+-      element.frameId &&
 -      !isFrameLikeElement(element) &&
-       !isElementInFrame(element, elementsMap, appState)
-     ) {
+-      !isElementInFrame(element, elementsMap, appState)
+-    ) {
++    // Check if element (including nested frames) should be removed from its parent frame
++    if (element.frameId && !isElementInFrame(element, elementsMap, appState)) {
 +      if (isFrameLikeElement(element)) {
 +        const currentParent = elementsMap.get(element.frameId);
 +        if (
@@ -977,7 +1007,7 @@ index bc2cdf285..dc49eece4 100644
        elementsToRemove.add(element);
      }
    });
-@@ -855,6 +1601,12 @@ export const isElementInFrame = (
+@@ -855,6 +1613,12 @@ export const isElementInFrame = (
    }
  
    if (_element.groupIds.length === 0) {
@@ -990,7 +1020,7 @@ index bc2cdf285..dc49eece4 100644
      return elementOverlapsWithFrame(_element, frame, allElementsMap);
    }
  
-@@ -915,10 +1667,38 @@ export const shouldApplyFrameClip = (
+@@ -915,10 +1679,38 @@ export const shouldApplyFrameClip = (
    elementsMap: ElementsMap,
    checkedGroups?: Map<string, boolean>,
  ) => {
@@ -1030,7 +1060,7 @@ index bc2cdf285..dc49eece4 100644
    // for individual elements, only clip when the element is
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
-@@ -968,7 +1748,7 @@ export const shouldApplyFrameClip = (
+@@ -968,7 +1760,7 @@ export const shouldApplyFrameClip = (
    return false;
  };
  
@@ -1040,7 +1070,7 @@ index bc2cdf285..dc49eece4 100644
  
  export const getDefaultFrameName = (element: ExcalidrawFrameLikeElement) => {
 diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
-index a65e38dba..e2e359b09 100644
+index a65e38dba..02068712f 100644
 --- a/packages/element/src/newElement.ts
 +++ b/packages/element/src/newElement.ts
 @@ -5,6 +5,7 @@ import {
@@ -1119,7 +1149,7 @@ index a65e38dba..e2e359b09 100644
    } & ElementConstructorOpts,
  ): NonDeleted<ExcalidrawMagicFrameElement> => {
    const frameElement = newElementWith(
-@@ -211,12 +252,29 @@ export const newMagicFrameElement = (
+@@ -211,6 +252,23 @@ export const newMagicFrameElement = (
        ..._newElementBase<ExcalidrawMagicFrameElement>("magicframe", opts),
        type: "magicframe",
        name: opts?.name || null,
@@ -1143,13 +1173,6 @@ index a65e38dba..e2e359b09 100644
      },
      {},
    );
- 
-   return frameElement;
--};
-+}
- 
- /**
-  * The point of the text box its alignment pins, as ratios of width/height.
 diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
 index 22c3ed494..6d77a9db3 100644
 --- a/packages/element/src/renderElement.ts
@@ -1223,7 +1246,7 @@ index 22c3ed494..6d77a9db3 100644
  
          if (FRAME_STYLE.radius && context.roundRect) {
 diff --git a/packages/element/src/resizeElements.ts b/packages/element/src/resizeElements.ts
-index 9915df266..93d01b25c 100644
+index 9915df266..165bdb3ea 100644
 --- a/packages/element/src/resizeElements.ts
 +++ b/packages/element/src/resizeElements.ts
 @@ -61,6 +61,7 @@ import {
@@ -1352,34 +1375,115 @@ index 9915df266..93d01b25c 100644
    const boundTextElementId = getBoundTextElementId(element);
  
    let update: ElementUpdate<NonDeletedExcalidrawElement> = {
-@@ -425,8 +456,7 @@ const rotateMultipleElements = (
+@@ -425,68 +456,131 @@ const rotateMultipleElements = (
    >(elements.map((element) => [element.id, element]));
  
    for (const element of elements) {
 -    if (!isFrameLikeElement(element)) {
 -      const [x1, y1, x2, y2] = getElementAbsoluteCoords(element, elementsMap);
+-      const cx = (x1 + x2) / 2;
+-      const cy = (y1 + y2) / 2;
+-      const origAngle =
+-        originalElements.get(element.id)?.angle ?? element.angle;
+-      const [rotatedCX, rotatedCY] = pointRotateRads(
+-        pointFrom(cx, cy),
+-        pointFrom(centerX, centerY),
+-        (centerAngle + origAngle - element.angle) as Radians,
+-      );
 +    const [x1, y1, x2, y2] = getElementAbsoluteCoords(element, elementsMap);
-       const cx = (x1 + x2) / 2;
-       const cy = (y1 + y2) / 2;
-       const origAngle =
-@@ -468,7 +498,11 @@ const rotateMultipleElements = (
-       }
++    const cx = (x1 + x2) / 2;
++    const cy = (y1 + y2) / 2;
++    const origAngle = originalElements.get(element.id)?.angle ?? element.angle;
++    const [rotatedCX, rotatedCY] = pointRotateRads(
++      pointFrom(cx, cy),
++      pointFrom(centerX, centerY),
++      (centerAngle + origAngle - element.angle) as Radians,
++    );
  
-       const boundText = getBoundTextElement(element, elementsMap);
--      if (boundText && !isArrowElement(element)) {
-+      if (
-+        boundText &&
-+        !isArrowElement(element) &&
-+        !rotatedElementsMap.has(boundText.id)
-+      ) {
-         const { x, y } = computeBoundTextPosition(
-           element,
-           boundText,
-@@ -481,12 +515,73 @@ const rotateMultipleElements = (
-           angle: normalizeRadians((centerAngle + origAngle) as Radians),
-         });
+-      const updates = isElbowArrow(element)
+-        ? {
+-            // Needed to re-route the arrow
+-            points: getArrowLocalFixedPoints(element, elementsMap),
+-          }
+-        : {
+-            x: element.x + (rotatedCX - cx),
+-            y: element.y + (rotatedCY - cy),
+-            angle: normalizeRadians((centerAngle + origAngle) as Radians),
+-          };
++    const updates = isElbowArrow(element)
++      ? {
++          // Needed to re-route the arrow
++          points: getArrowLocalFixedPoints(element, elementsMap),
++        }
++      : {
++          x: element.x + (rotatedCX - cx),
++          y: element.y + (rotatedCY - cy),
++          angle: normalizeRadians((centerAngle + origAngle) as Radians),
++        };
+ 
+-      scene.mutateElement(element, updates);
++    scene.mutateElement(element, updates);
+ 
+-      updateBoundElements(element, scene, {
+-        simultaneouslyUpdated: elements,
+-      });
++    updateBoundElements(element, scene, {
++      simultaneouslyUpdated: elements,
++    });
+ 
+-      if (isBindingElement(element)) {
+-        if (element.startBinding) {
+-          if (!rotatedElementsMap.has(element.startBinding.elementId)) {
+-            unbindBindingElement(element, "start", scene);
+-          }
++    if (isBindingElement(element)) {
++      if (element.startBinding) {
++        if (!rotatedElementsMap.has(element.startBinding.elementId)) {
++          unbindBindingElement(element, "start", scene);
+         }
+-        if (element.endBinding) {
+-          if (!rotatedElementsMap.has(element.endBinding.elementId)) {
+-            unbindBindingElement(element, "end", scene);
+-          }
++      }
++      if (element.endBinding) {
++        if (!rotatedElementsMap.has(element.endBinding.elementId)) {
++          unbindBindingElement(element, "end", scene);
+         }
        }
--    }
++    }
+ 
+-      const boundText = getBoundTextElement(element, elementsMap);
+-      if (boundText && !isArrowElement(element)) {
+-        const { x, y } = computeBoundTextPosition(
+-          element,
+-          boundText,
+-          elementsMap,
+-        );
++    const boundText = getBoundTextElement(element, elementsMap);
++    if (
++      boundText &&
++      !isArrowElement(element) &&
++      !rotatedElementsMap.has(boundText.id)
++    ) {
++      const { x, y } = computeBoundTextPosition(
++        element,
++        boundText,
++        elementsMap,
++      );
+ 
+-        scene.mutateElement(boundText, {
+-          x,
+-          y,
+-          angle: normalizeRadians((centerAngle + origAngle) as Radians),
+-        });
+-      }
++      scene.mutateElement(boundText, {
++        x,
++        y,
++        angle: normalizeRadians((centerAngle + origAngle) as Radians),
++      });
+     }
    }
  
    scene.triggerUpdate();
@@ -1450,7 +1554,7 @@ index 9915df266..93d01b25c 100644
  export const getResizeOffsetXY = (
    transformHandleType: MaybeTransformHandleType,
    selectedElements: NonDeletedExcalidrawElement[],
-@@ -909,6 +1004,35 @@ export const resizeSingleElement = (
+@@ -909,6 +1003,34 @@ export const resizeSingleElement = (
        isDragging: false,
      });
  
@@ -1470,8 +1574,7 @@ index 9915df266..93d01b25c 100644
 +        horizontal:
 +          Math.abs(nextWidth) !== origElement.width ? false : hug.horizontal,
 +        vertical:
-+          latestElement.collapsed ||
-+          Math.abs(nextHeight) === origElement.height
++          latestElement.collapsed || Math.abs(nextHeight) === origElement.height
 +            ? hug.vertical
 +            : false,
 +      };
@@ -1487,7 +1590,7 @@ index 9915df266..93d01b25c 100644
        scene.mutateElement(boundTextElement, {
          fontSize: boundTextFont.fontSize,
 diff --git a/packages/element/src/transformHandles.ts b/packages/element/src/transformHandles.ts
-index 7ef56849c..fb7d27680 100644
+index 7ef56849c..67e46522c 100644
 --- a/packages/element/src/transformHandles.ts
 +++ b/packages/element/src/transformHandles.ts
 @@ -15,6 +15,7 @@ import type { Bounds } from "@excalidraw/common";
@@ -1498,18 +1601,20 @@ index 7ef56849c..fb7d27680 100644
    isElbowArrow,
    isFrameLikeElement,
    isImageElement,
-@@ -281,8 +282,8 @@ export const getTransformHandles = (
+@@ -279,11 +280,7 @@ export const getTransformHandles = (
+   // so that when locked element is selected (especially when you toggle lock
+   // via keyboard) the locked element is visually distinct, indicating
    // you can't move/resize
-   if (
-     element.locked ||
+-  if (
+-    element.locked ||
 -    // Elbow arrows cannot be rotated
 -    isElbowArrow(element)
-+    isElbowArrow(element) ||
-+    isBoundToContainer(element)
-   ) {
+-  ) {
++  if (element.locked || isElbowArrow(element) || isBoundToContainer(element)) {
      return {};
    }
-@@ -340,6 +341,9 @@ export const hasBoundingBox = (
+ 
+@@ -340,6 +337,9 @@ export const hasBoundingBox = (
      return true;
    }
    const element = elements[0];
@@ -1649,7 +1754,7 @@ index 193f5d86d..30071f456 100644
      return {
        elements: nextElements,
 diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
-index 6ffcc5f5e..e4028cf58 100644
+index 6ffcc5f5e..356219207 100644
 --- a/packages/excalidraw/actions/actionFrame.ts
 +++ b/packages/excalidraw/actions/actionFrame.ts
 @@ -4,6 +4,7 @@ import { newFrameElement } from "@excalidraw/element";
@@ -1687,7 +1792,7 @@ index 6ffcc5f5e..e4028cf58 100644
  
      // for a selected partial group, we want to remove it from the remainder of the group
      if (appState.editingGroupId) {
-@@ -178,3 +171,180 @@ export const actionWrapSelectionInFrame = register({
+@@ -178,3 +171,182 @@ export const actionWrapSelectionInFrame = register({
      };
    },
  });
@@ -1742,12 +1847,16 @@ index 6ffcc5f5e..e4028cf58 100644
 +    mutateElement(
 +      selectedElement,
 +      elementsMap,
-+      getFittedFrameGeometry([x1, y1, x2, y2], {
-+        horizontal: selectedElement.autoLayoutPadding?.horizontal,
-+        vertical: selectedElement.autoLayoutPadding?.vertical,
-+      }, {
-+        titleFontSize: selectedElement.fontSize,
-+      }),
++      getFittedFrameGeometry(
++        [x1, y1, x2, y2],
++        {
++          horizontal: selectedElement.autoLayoutPadding?.horizontal,
++          vertical: selectedElement.autoLayoutPadding?.vertical,
++        },
++        {
++          titleFontSize: selectedElement.fontSize,
++        },
++      ),
 +    );
 +
 +    return {
@@ -1763,9 +1872,7 @@ index 6ffcc5f5e..e4028cf58 100644
 +  },
 +});
 +
-+const createAutoLayoutFrameAction = (
-+  direction: "vertical" | "horizontal",
-+) =>
++const createAutoLayoutFrameAction = (direction: "vertical" | "horizontal") =>
 +  register({
 +    name:
 +      direction === "vertical"
@@ -1869,7 +1976,7 @@ index 6ffcc5f5e..e4028cf58 100644
 +  },
 +});
 diff --git a/packages/excalidraw/actions/actionProperties.tsx b/packages/excalidraw/actions/actionProperties.tsx
-index 5b04fc2b6..0b3bc7431 100644
+index d7c537656..8e17c41e0 100644
 --- a/packages/excalidraw/actions/actionProperties.tsx
 +++ b/packages/excalidraw/actions/actionProperties.tsx
 @@ -26,6 +26,7 @@ import {
@@ -1911,7 +2018,7 @@ index 5b04fc2b6..0b3bc7431 100644
        return oldElement;
      },
      true,
-@@ -992,6 +1001,9 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
+@@ -1003,6 +1012,9 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
                    if (isTextElement(element)) {
                      return element.fontSize;
                    }
@@ -1921,7 +2028,7 @@ index 5b04fc2b6..0b3bc7431 100644
                    const boundTextElement = getBoundTextElement(
                      element,
                      app.scene.getNonDeletedElementsMap(),
-@@ -1003,6 +1015,7 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
+@@ -1014,6 +1026,7 @@ export const actionChangeFontSize = register<ExcalidrawTextElement["fontSize"]>(
                  },
                  (element) =>
                    isTextElement(element) ||
@@ -1965,7 +2072,7 @@ index 2fe4a6801..e28e364e4 100644
    elementsToHighlight: { browser: false, export: false, server: false },
    toast: { browser: false, export: false, server: false },
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 2efd69137..d62e680cf 100644
+index 2efd69137..8fa272020 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -180,7 +180,6 @@ import {
@@ -1984,7 +2091,7 @@ index 2efd69137..d62e680cf 100644
    getFrameLikeTitle,
    getElementsOverlappingFrame,
    filterElementsEligibleAsFrameChildren,
-@@ -258,6 +258,23 @@ import {
+@@ -258,6 +258,24 @@ import {
    isEligibleFrameChildType,
    getBindingStrategyForDraggingBindingElementEndpoints,
    isNonDeletedElement,
@@ -2004,11 +2111,12 @@ index 2efd69137..d62e680cf 100644
 +  positionAutoLayoutDrop,
 +  layoutAutoLayoutFrames,
 +  layoutFrameChildren,
++  updateBoundElementsAfterAutoLayout,
 +  normalizeFrameAutoLayoutHug,
  } from "@excalidraw/element";
  
  import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
-@@ -335,6 +352,10 @@ import {
+@@ -335,6 +353,10 @@ import {
    actionRemoveAllElementsFromFrame,
    actionSelectAllElementsInFrame,
    actionWrapSelectionInFrame,
@@ -2019,7 +2127,7 @@ index 2efd69137..d62e680cf 100644
  } from "../actions/actionFrame";
  import { createRedoAction, createUndoAction } from "../actions/actionHistory";
  import { actionTextAutoResize } from "../actions/actionTextAutoResize";
-@@ -802,6 +823,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -802,6 +824,12 @@ class App extends React.Component<AppProps, AppState> {
        refreshTextElementDimensions: this.refreshTextElementDimensions,
        rerouteElbowArrow: this.rerouteElbowArrow,
        rotateSelectedElements: this.rotateSelectedElements,
@@ -2032,15 +2140,12 @@ index 2efd69137..d62e680cf 100644
        getEditorInterface: () => this.editorInterface,
        updateFrameRendering: this.updateFrameRendering,
        toggleSidebar: this.toggleSidebar,
-@@ -2169,8 +2196,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2169,8 +2197,13 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
 +      const [titleSceneX, titleSceneY] = pointRotateRads(
-+        pointFrom(
-+          f.x + FRAME_STYLE.nameInsetX,
-+          f.y + FRAME_STYLE.nameInsetY,
-+        ),
++        pointFrom(f.x + FRAME_STYLE.nameInsetX, f.y + FRAME_STYLE.nameInsetY),
 +        pointFrom(f.x + f.width / 2, f.y + f.height / 2),
 +        f.angle,
 +      );
@@ -2050,14 +2155,12 @@ index 2efd69137..d62e680cf 100644
          this.state,
        );
  
-@@ -2214,11 +2249,11 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2214,11 +2247,9 @@ class App extends React.Component<AppProps, AppState> {
                borderRadius: 4,
                boxShadow: "inset 0 0 0 1px var(--color-primary)",
                fontFamily: "Assistant",
 -              fontSize: `${FRAME_STYLE.nameFontSize}px`,
-+              fontSize: `${
-+                getFrameNameFontSize(f) * this.state.zoom.value
-+              }px`,
++              fontSize: `${getFrameNameFontSize(f) * this.state.zoom.value}px`,
                transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
 -              color: isDarkTheme
 -                ? FRAME_STYLE.nameColorDarkTheme
@@ -2066,7 +2169,7 @@ index 2efd69137..d62e680cf 100644
                overflow: "hidden",
                maxWidth: `${
                  this.ownerDocument.body.clientWidth -
-@@ -2244,29 +2279,25 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2244,29 +2275,23 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -2100,15 +2203,13 @@ index 2efd69137..d62e680cf 100644
                  ? "none"
 -                : `${f.width * this.state.zoom.value}px`,
 +                : `${
-+                    Math.max(
-+                      0,
-+                      f.width - FRAME_STYLE.nameInsetX * 2,
-+                    ) * this.state.zoom.value
++                    Math.max(0, f.width - FRAME_STYLE.nameInsetX * 2) *
++                    this.state.zoom.value
 +                  }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
              whiteSpace: "nowrap",
              textOverflow: "ellipsis",
-@@ -3297,6 +3328,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -3297,6 +3322,7 @@ class App extends React.Component<AppProps, AppState> {
        croppingElementId: null,
        suggestedBinding: null,
        frameToHighlight: null,
@@ -2116,9 +2217,9 @@ index 2efd69137..d62e680cf 100644
        elementsToHighlight: null,
        snapLines: [],
        showHyperlinkPopup: false,
-@@ -5268,6 +5300,247 @@ class App extends React.Component<AppProps, AppState> {
-       return rotated;
-     };
+@@ -5188,6 +5214,232 @@ class App extends React.Component<AppProps, AppState> {
+     this.setState({ toast });
+   };
  
 +  public autoResizeFrame: ExcalidrawImperativeAPI["autoResizeFrame"] = (
 +    frameId,
@@ -2135,7 +2236,6 @@ index 2efd69137..d62e680cf 100644
 +      getNonDeletedElements(this.scene.getElementsIncludingDeleted()),
 +      frameId,
 +    );
-+
 +    if (childElements.length === 0) {
 +      return false;
 +    }
@@ -2145,7 +2245,6 @@ index 2efd69137..d62e680cf 100644
 +      opts.padding === undefined
 +        ? undefined
 +        : { horizontal: opts.padding, vertical: opts.padding };
-+
 +    mutateElement(
 +      frame,
 +      elementsMap,
@@ -2162,8 +2261,8 @@ index 2efd69137..d62e680cf 100644
 +    frameId,
 +    direction,
 +    opts = {},
-+  ) => {
-+    return this.updateFrameLayout(frameId, {
++  ) =>
++    this.updateFrameLayout(frameId, {
 +      autoLayout: direction,
 +      width: opts.width,
 +      height: opts.height,
@@ -2172,7 +2271,6 @@ index 2efd69137..d62e680cf 100644
 +      hug: opts.hug,
 +      align: opts.align,
 +    });
-+  };
 +
 +  public updateFrameLayout: ExcalidrawImperativeAPI["updateFrameLayout"] = (
 +    frameId,
@@ -2180,7 +2278,6 @@ index 2efd69137..d62e680cf 100644
 +  ) => {
 +    const elementsMap = this.scene.getNonDeletedElementsMap();
 +    const frame = elementsMap.get(frameId);
-+
 +    if (!frame || !isFrameLikeElement(frame)) {
 +      return false;
 +    }
@@ -2191,17 +2288,13 @@ index 2efd69137..d62e680cf 100644
 +      requestedLayout === "auto"
 +        ? inferFrameAutoLayoutDirection(frame, elementsMap)
 +        : requestedLayout;
-+    const enabling = !frame.autoLayout && Boolean(autoLayout);
-+    const conversion = enabling
-+      ? getFrameAutoLayoutConversionSettings()
-+      : null;
-+
++    const conversion =
++      !frame.autoLayout && autoLayout
++        ? getFrameAutoLayoutConversionSettings()
++        : null;
 +    const padding =
 +      typeof opts.padding === "number"
-+        ? {
-+            horizontal: opts.padding,
-+            vertical: opts.padding,
-+          }
++        ? { horizontal: opts.padding, vertical: opts.padding }
 +        : {
 +            horizontal:
 +              opts.padding?.horizontal ??
@@ -2214,7 +2307,6 @@ index 2efd69137..d62e680cf 100644
 +              frame.autoLayoutPadding?.vertical ??
 +              DEFAULT_FRAME_CONTENT_PADDING_Y,
 +          };
-+
 +    const gap =
 +      opts.gap ??
 +      conversion?.gap ??
@@ -2227,8 +2319,7 @@ index 2efd69137..d62e680cf 100644
 +        : {
 +            horizontal:
 +              opts.width !== undefined ? false : currentHug.horizontal,
-+            vertical:
-+              opts.height !== undefined ? false : currentHug.vertical,
++            vertical: opts.height !== undefined ? false : currentHug.vertical,
 +          };
 +    const align =
 +      opts.align ?? conversion?.align ?? getFrameAutoLayoutAlign(frame);
@@ -2261,6 +2352,7 @@ index 2efd69137..d62e680cf 100644
 +          align,
 +        },
 +      );
++      updateBoundElementsAfterAutoLayout(this.scene);
 +    }
 +
 +    if (opts.collapsed !== undefined) {
@@ -2275,7 +2367,6 @@ index 2efd69137..d62e680cf 100644
 +    frameId,
 +  ) => {
 +    const frame = this.scene.getNonDeletedElement(frameId);
-+
 +    if (!frame || !isFrameLikeElement(frame)) {
 +      return null;
 +    }
@@ -2292,11 +2383,9 @@ index 2efd69137..d62e680cf 100644
 +          frame.autoLayoutPadding?.horizontal ??
 +          DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
 +        vertical:
-+          frame.autoLayoutPadding?.vertical ??
-+          DEFAULT_FRAME_CONTENT_PADDING_Y,
++          frame.autoLayoutPadding?.vertical ?? DEFAULT_FRAME_CONTENT_PADDING_Y,
 +      },
-+      autoLayoutGap:
-+        frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP,
++      autoLayoutGap: frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP,
 +      autoLayoutHug: getFrameAutoLayoutHug(frame),
 +      autoLayoutAlign: getFrameAutoLayoutAlign(frame),
 +      clip: frame.clip,
@@ -2310,7 +2399,6 @@ index 2efd69137..d62e680cf 100644
 +  ) => {
 +    const elementsMap = this.scene.getNonDeletedElementsMap();
 +    const frame = elementsMap.get(frameId);
-+
 +    if (!frame || !isFrameLikeElement(frame)) {
 +      return false;
 +    }
@@ -2318,7 +2406,6 @@ index 2efd69137..d62e680cf 100644
 +    mutateElement(frame, elementsMap, {
 +      clip: clip !== undefined ? clip : !frame.clip,
 +    });
-+
 +    this.scene.triggerUpdate();
 +    return true;
 +  };
@@ -2329,12 +2416,12 @@ index 2efd69137..d62e680cf 100644
 +  ) => {
 +    const elementsMap = this.scene.getNonDeletedElementsMap();
 +    const frame = elementsMap.get(frameId);
-+
 +    if (!frame || !isFrameLikeElement(frame)) {
 +      return false;
 +    }
 +
-+    const nextCollapsed = collapsed !== undefined ? collapsed : !frame.collapsed;
++    const nextCollapsed =
++      collapsed !== undefined ? collapsed : !frame.collapsed;
 +    if (nextCollapsed === Boolean(frame.collapsed)) {
 +      return true;
 +    }
@@ -2346,13 +2433,12 @@ index 2efd69137..d62e680cf 100644
 +        height: getCollapsedFrameHeight(frame),
 +      });
 +    } else {
-+      const restoredHeight = Math.max(
-+        frame.expandedHeight ?? frame.height,
-+        getCollapsedFrameHeight(frame),
-+      );
 +      mutateElement(frame, elementsMap, {
 +        collapsed: false,
-+        height: restoredHeight,
++        height: Math.max(
++          frame.expandedHeight ?? frame.height,
++          getCollapsedFrameHeight(frame),
++        ),
 +        expandedHeight: null,
 +      });
 +    }
@@ -2361,10 +2447,10 @@ index 2efd69137..d62e680cf 100644
 +    return true;
 +  };
 +
-   public setActiveLinearElement: ExcalidrawImperativeAPI["setActiveLinearElement"] =
-     (elementId, opts = {}) => {
-       if (elementId === null) {
-@@ -6261,6 +6534,7 @@ class App extends React.Component<AppProps, AppState> {
+   restoreFileFromShare = async () => {
+     try {
+       const webShareTargetCache = await caches.open("web-share-target");
+@@ -6261,6 +6513,7 @@ class App extends React.Component<AppProps, AppState> {
            ? prevState.selectedLinearElement
            : null,
          frameToHighlight: null,
@@ -2372,7 +2458,7 @@ index 2efd69137..d62e680cf 100644
          // only the text tool offers arrow-endpoint binding, and the highlight
          // is refreshed on pointermove — don't leave a stale one behind
          hoveredArrowTextAnchor: null,
-@@ -6771,12 +7045,33 @@ class App extends React.Component<AppProps, AppState> {
+@@ -6771,12 +7024,33 @@ class App extends React.Component<AppProps, AppState> {
          if (containingFrame && !isNonDeletedElement(containingFrame)) {
            console.error("[NONDELETED][INVARIANT] Containing frame is deleted");
          }
@@ -2412,7 +2498,7 @@ index 2efd69137..d62e680cf 100644
            ? isCursorInFrame(
                { x, y },
                containingFrame as NonDeleted<ExcalidrawFrameLikeElement>,
-@@ -7734,9 +8029,26 @@ class App extends React.Component<AppProps, AppState> {
+@@ -7734,9 +8008,23 @@ class App extends React.Component<AppProps, AppState> {
  
    private updateFrameToHighlight = (
      frameToHighlight: AppState["frameToHighlight"],
@@ -2430,10 +2516,7 @@ index 2efd69137..d62e680cf 100644
 +        prevIndicator.y1 !== nextIndicator.y1 ||
 +        prevIndicator.x2 !== nextIndicator.x2 ||
 +        prevIndicator.y2 !== nextIndicator.y2);
-+    if (
-+      this.state.frameToHighlight !== frameToHighlight ||
-+      indicatorChanged
-+    ) {
++    if (this.state.frameToHighlight !== frameToHighlight || indicatorChanged) {
 +      this.setState({
 +        frameToHighlight,
 +        autoLayoutDropIndicator: nextIndicator,
@@ -2441,24 +2524,26 @@ index 2efd69137..d62e680cf 100644
      }
    };
  
-@@ -11036,17 +11348,42 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11036,17 +11324,45 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
 -        const selectedElementsHasAFrame = selectedElements.some((e) =>
 -          isFrameLikeElement(e),
--        );
++        // Allow frames to be nested inside other frames only when fully inside
++        let frameToHighlight = this.getTopLayerFrameAtSceneCoords(
++          pointerCoords,
++          {
++            currentFrameId: getCommonFrameId(selectedElements),
++            excludeElementIds: this.state.selectedElementIds,
++          },
+         );
 -        const frameToHighlight = selectedElementsHasAFrame
 -          ? null
 -          : this.getTopLayerFrameAtSceneCoords(pointerCoords, {
 -              currentFrameId: getCommonFrameId(selectedElements),
 -              excludeElementIds: this.state.selectedElementIds,
 -            });
-+        // Allow frames to be nested inside other frames only when fully inside
-+        let frameToHighlight = this.getTopLayerFrameAtSceneCoords(pointerCoords, {
-+          currentFrameId: getCommonFrameId(selectedElements),
-+          excludeElementIds: this.state.selectedElementIds,
-+        });
 +        if (frameToHighlight) {
 +          const selectedFrames = selectedElements.filter(isFrameLikeElement);
 +          if (
@@ -2494,7 +2579,7 @@ index 2efd69137..d62e680cf 100644
  
          // Marking that click was used for dragging to check
          // if elements should be deselected on pointerup
-@@ -11725,6 +12062,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11725,6 +12041,7 @@ class App extends React.Component<AppProps, AppState> {
          resizingElement: null,
          selectionElement: null,
          frameToHighlight: null,
@@ -2502,7 +2587,7 @@ index 2efd69137..d62e680cf 100644
          elementsToHighlight: null,
          cursorButton: "up",
          snapLines: updateStable(prevState.snapLines, []),
-@@ -12128,6 +12466,17 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12128,6 +12445,18 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -2515,12 +2600,13 @@ index 2efd69137..d62e680cf 100644
 +            frame,
 +            this.scene.getElementsMapIncludingDeleted(),
 +          );
++          updateBoundElementsAfterAutoLayout(this.scene);
 +        }
 +
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12230,9 +12579,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12230,9 +12559,16 @@ class App extends React.Component<AppProps, AppState> {
              topLayerFrame &&
              !this.state.selectedElementIds[topLayerFrame.id]
            ) {
@@ -2540,7 +2626,7 @@ index 2efd69137..d62e680cf 100644
  
              if (this.state.editingGroupId) {
                updateGroupIdsAfterEditingGroup(elementsToAdd);
-@@ -12261,6 +12617,25 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12261,7 +12597,27 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -2564,9 +2650,11 @@ index 2efd69137..d62e680cf 100644
 +          });
 +
            this.scene.replaceAllElements(nextElements);
++          updateBoundElementsAfterAutoLayout(this.scene);
          }
        }
-@@ -12279,31 +12654,13 @@ class App extends React.Component<AppProps, AppState> {
+ 
+@@ -12279,32 +12635,15 @@ class App extends React.Component<AppProps, AppState> {
          });
        }
  
@@ -2602,9 +2690,11 @@ index 2efd69137..d62e680cf 100644
 +          editingGroupId: this.state.editingGroupId,
 +        });
          this.scene.replaceAllElements(nextElements);
++        updateBoundElementsAfterAutoLayout(this.scene);
        }
  
-@@ -13805,29 +14162,6 @@ class App extends React.Component<AppProps, AppState> {
+       // Code below handles selection when element(s) weren't
+@@ -13805,29 +14144,6 @@ class App extends React.Component<AppProps, AppState> {
          pointerDownState.resize.center.y,
        )
      ) {
@@ -2634,7 +2724,7 @@ index 2efd69137..d62e680cf 100644
        return true;
      }
      return false;
-@@ -13903,6 +14237,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13903,6 +14219,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,
@@ -2836,17 +2926,21 @@ index 623d54779..752fab88b 100644
    );
  };
 diff --git a/packages/excalidraw/components/Stats/MultiAngle.tsx b/packages/excalidraw/components/Stats/MultiAngle.tsx
-index e232f5ec1..45e7e6e57 100644
+index e232f5ec1..1be5c2f14 100644
 --- a/packages/excalidraw/components/Stats/MultiAngle.tsx
 +++ b/packages/excalidraw/components/Stats/MultiAngle.tsx
-@@ -1,9 +1,14 @@
+@@ -1,9 +1,18 @@
 -import { degreesToRadians, radiansToDegrees } from "@excalidraw/math";
 -
 -import { getBoundTextElement } from "@excalidraw/element";
 -import { isArrowElement } from "@excalidraw/element";
 -
 -import { isInGroup } from "@excalidraw/element";
-+import { degreesToRadians, radiansToDegrees, type Radians } from "@excalidraw/math";
++import {
++  degreesToRadians,
++  radiansToDegrees,
++  type Radians,
++} from "@excalidraw/math";
 +
 +import {
 +  collectFrameDescendants,
@@ -2860,7 +2954,7 @@ index e232f5ec1..45e7e6e57 100644
  
  import type { Degrees } from "@excalidraw/math";
  
-@@ -28,6 +33,44 @@ interface MultiAngleProps {
+@@ -28,6 +37,44 @@ interface MultiAngleProps {
  
  const STEP_SIZE = 15;
  
@@ -2905,7 +2999,7 @@ index e232f5ec1..45e7e6e57 100644
  const handleDegreeChange: DragInputCallbackType<
    MultiAngleProps["property"]
  > = ({
-@@ -48,14 +91,25 @@ const handleDegreeChange: DragInputCallbackType<
+@@ -48,14 +95,25 @@ const handleDegreeChange: DragInputCallbackType<
  
    if (nextValue !== undefined) {
      const nextAngle = degreesToRadians(nextValue as Degrees);
@@ -2931,7 +3025,7 @@ index e232f5ec1..45e7e6e57 100644
  
        const boundTextElement = getBoundTextElement(element, elementsMap);
        if (boundTextElement && !isArrowElement(element)) {
-@@ -86,10 +140,21 @@ const handleDegreeChange: DragInputCallbackType<
+@@ -86,10 +144,21 @@ const handleDegreeChange: DragInputCallbackType<
        nextAngleInDegrees < 0 ? nextAngleInDegrees + 360 : nextAngleInDegrees;
  
      const nextAngle = degreesToRadians(nextAngleInDegrees as Degrees);
@@ -3247,7 +3341,7 @@ index 4a6fa1de4..51ccda237 100644
      "embeddable": "Web Embed",
      "selection": "Selection",
 diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
-index 03a3de79f..9816018fa 100644
+index 03a3de79f..0d13a3cf1 100644
 --- a/packages/excalidraw/renderer/interactiveScene.ts
 +++ b/packages/excalidraw/renderer/interactiveScene.ts
 @@ -41,6 +41,7 @@ import {
@@ -3305,7 +3399,7 @@ index 03a3de79f..9816018fa 100644
      );
 +    renderAutoLayoutDropIndicator(context, appState);
    }
-
+ 
    if (appState.elementsToHighlight) {
 @@ -1889,7 +1916,8 @@ const _renderInteractiveScene = ({
            // local user
@@ -3317,17 +3411,8 @@ index 03a3de79f..9816018fa 100644
            ) {
              selectionColors.push(
                renderConfig.getSelectionColorForElement?.(
-@@ -1992,6 +2020,8 @@ const _renderInteractiveScene = ({
-       if (
-         !appState.viewModeEnabled &&
-         showBoundingBox &&
-+        // do not show transform handles when text is being edited
-+        !isTextElement(appState.editingTextElement) &&
-         // do not show transform handles when image is being cropped
-         !appState.croppingElementId
-       ) {
 diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
-index 2ecef953e..4142ba82a 100644
+index 2ecef953e..bcf0e6978 100644
 --- a/packages/excalidraw/renderer/renderNewElementScene.ts
 +++ b/packages/excalidraw/renderer/renderNewElementScene.ts
 @@ -5,6 +5,7 @@ import {
@@ -3338,7 +3423,7 @@ index 2ecef953e..4142ba82a 100644
  } from "@excalidraw/element";
  
  import { bootstrapCanvas, getNormalizedCanvasDimensions } from "./helpers";
-@@ -57,13 +58,16 @@ const _renderNewElementScene = ({
+@@ -57,13 +58,21 @@ const _renderNewElementScene = ({
          appState.frameRendering.enabled &&
          appState.frameRendering.clip
        ) {
@@ -3355,7 +3440,12 @@ index 2ecef953e..4142ba82a 100644
 +        for (const ancestorFrame of ancestorFrames.reverse()) {
 +          if (
 +            ancestorFrame.clip !== false &&
-+            shouldApplyFrameClip(newElement, ancestorFrame, appState, elementsMap)
++            shouldApplyFrameClip(
++              newElement,
++              ancestorFrame,
++              appState,
++              elementsMap,
++            )
 +          ) {
 +            frameClip(ancestorFrame, context, renderConfig, appState);
 +          }
@@ -3363,7 +3453,7 @@ index 2ecef953e..4142ba82a 100644
        }
  
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
-index 278359994..cb0c2ba32 100644
+index 278359994..ea9c60f87 100644
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
 @@ -10,6 +10,7 @@ import { createPlaceholderEmbeddableLabel } from "@excalidraw/element";
@@ -3393,21 +3483,16 @@ index 278359994..cb0c2ba32 100644
    NonDeletedExcalidrawElement,
  } from "@excalidraw/element/types";
  
-@@ -136,7 +139,12 @@ export const frameClip = (
+@@ -136,7 +139,7 @@ export const frameClip = (
    renderConfig: StaticCanvasRenderConfig,
    appState: StaticCanvasAppState,
  ) => {
 -  context.translate(frame.x + appState.scrollX, frame.y + appState.scrollY);
-+  applyFrameCanvasTransform(
-+    context,
-+    frame,
-+    appState.scrollX,
-+    appState.scrollY,
-+  );
++  applyFrameCanvasTransform(context, frame, appState.scrollX, appState.scrollY);
    context.beginPath();
    if (context.roundRect) {
      context.roundRect(
-@@ -150,10 +158,82 @@ export const frameClip = (
+@@ -150,12 +153,86 @@ export const frameClip = (
      context.rect(0, 0, frame.width, frame.height);
    }
    context.clip();
@@ -3418,9 +3503,9 @@ index 278359994..cb0c2ba32 100644
 -    -(frame.y + appState.scrollY),
 +    -(frame.x + frame.width / 2 + appState.scrollX),
 +    -(frame.y + frame.height / 2 + appState.scrollY),
-+  );
-+};
-+
+   );
+ };
+ 
 +/**
 + * Renders the background fill for frames.
 + * This is called BEFORE rendering children so that children appear on top of the background.
@@ -3438,7 +3523,7 @@ index 278359994..cb0c2ba32 100644
 +
 +  const elementOrder = new Map(
 +    visibleElements.map((element, index) => [element.id, index]),
-   );
++  );
 +  const frameBackgrounds = visibleElements
 +    .filter(
 +      (element): element is NonDeleted<ExcalidrawFrameLikeElement> =>
@@ -3449,7 +3534,9 @@ index 278359994..cb0c2ba32 100644
 +      const depthA = getAncestorFrames(a, elementsMap).length;
 +      const depthB = getAncestorFrames(b, elementsMap).length;
 +
-+      return depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!;
++      return (
++        depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!
++      );
 +    });
 +
 +  // Render parent frame backgrounds before nested frame backgrounds.
@@ -3489,10 +3576,12 @@ index 278359994..cb0c2ba32 100644
 +
 +    context.restore();
 +  }
- };
- 
++};
++
  type LinkIconCanvas = HTMLCanvasElement & { zoom: number };
-@@ -304,6 +384,10 @@ const _renderStaticScene = ({
+ 
+ const linkIconCanvasCache: {
+@@ -304,6 +381,10 @@ const _renderStaticScene = ({
  
    const inFrameGroupsMap = new Map<string, boolean>();
  
@@ -3503,7 +3592,7 @@ index 278359994..cb0c2ba32 100644
    // Paint visible elements
    visibleElements
      .filter((el) => !isIframeLikeElement(el))
-@@ -327,18 +411,23 @@ const _renderStaticScene = ({
+@@ -327,18 +408,23 @@ const _renderStaticScene = ({
            appState.frameRendering.enabled &&
            appState.frameRendering.clip
          ) {
@@ -3539,7 +3628,7 @@ index 278359994..cb0c2ba32 100644
            }
            renderElement(
              element,
-@@ -443,19 +532,22 @@ const _renderStaticScene = ({
+@@ -443,19 +529,22 @@ const _renderStaticScene = ({
          ) {
            context.save();
  
@@ -3576,7 +3665,7 @@ index 278359994..cb0c2ba32 100644
            render();
            context.restore();
 diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
-index 9216e4272..457de28ae 100644
+index 9216e4272..079a593bb 100644
 --- a/packages/excalidraw/scene/export.ts
 +++ b/packages/excalidraw/scene/export.ts
 @@ -30,6 +30,9 @@ import {
@@ -3589,7 +3678,7 @@ index 9216e4272..457de28ae 100644
    getRootElements,
  } from "@excalidraw/element";
  
-@@ -109,22 +112,30 @@ const addFrameLabelsAsTextElements = (
+@@ -109,22 +112,28 @@ const addFrameLabelsAsTextElements = (
    const nextElements: NonDeletedExcalidrawElement[] = [];
    for (const element of elements) {
      if (isFrameLikeElement(element)) {
@@ -3620,9 +3709,7 @@ index 9216e4272..457de28ae 100644
 +      if (nameAlign !== "left") {
 +        const extra = Math.max(0, maxWidth - textElement.width);
 +        textElement = newElementWith(textElement, {
-+          x:
-+            textElement.x +
-+            (nameAlign === "center" ? extra / 2 : extra),
++          x: textElement.x + (nameAlign === "center" ? extra / 2 : extra),
 +        });
 +      }
  
@@ -3660,7 +3747,7 @@ index 4da68316d..1afe9567f 100644
    // a few tests with exportToCanvas (where we can't inspect elements)
    // ---------------------------------------------------------------------------
 diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
-index b13334bf7..e2050530b 100644
+index b13334bf7..d694f8e31 100644
 --- a/packages/excalidraw/types.ts
 +++ b/packages/excalidraw/types.ts
 @@ -45,6 +45,10 @@ import type {
@@ -3756,31 +3843,11 @@ index b13334bf7..e2050530b 100644
  export interface ExcalidrawImperativeAPI {
    /** Whether the editor has been unmounted and the API is no longer usable. */
    isDestroyed: boolean;
-@@ -1313,6 +1357,82 @@ export interface ExcalidrawImperativeAPI {
+@@ -1313,6 +1357,35 @@ export interface ExcalidrawImperativeAPI {
    ) => boolean;
    refreshTextElementDimensions: (elementIds?: string | string[]) => boolean;
    rerouteElbowArrow: (elementId: string) => boolean;
-+  /**
-+   * Auto-resizes a frame to fit all its child elements with optional padding.
-+   * Reserves space for the in-frame title so children do not overlap it.
-+   * @param frameId - The ID of the frame to resize
-+   * @param opts - Optional configuration
-+   * @param opts.padding - Padding around the content (default: 16px sides, 12px top/bottom below the title)
-+   * @returns true if the frame was resized, false if the frame was not found or has no children
-+   */
-+  autoResizeFrame: (
-+    frameId: string,
-+    opts?: { padding?: number },
-+  ) => boolean;
-+  /**
-+   * Enables frame auto-layout and arranges its child elements.
-+   * Passing `"auto"` infers direction from the current child arrangement.
-+   * Enabling from free layout applies conversion defaults (fixed size, 10px
-+   * padding/gap, center-left alignment) unless overridden in `opts`.
-+   * @param frameId - The ID of the frame to layout
-+   * @param direction - Layout direction, `"auto"` to infer, or null to disable
-+   * @returns true if the frame was updated, false if the frame was not found
-+   */
++  autoResizeFrame: (frameId: string, opts?: { padding?: number }) => boolean;
 +  autoLayoutFrame: (
 +    frameId: string,
 +    direction: FrameAutoLayoutDirection | "auto" | null,
@@ -3793,12 +3860,6 @@ index b13334bf7..e2050530b 100644
 +      align?: FrameAutoLayoutAlign;
 +    },
 +  ) => boolean;
-+  /**
-+   * Updates frame layout settings, including width, height, auto-layout direction,
-+   * padding, gap, per-axis hug (fit-to-content), and child alignment.
-+   * Passing `autoLayout: "auto"` infers direction. Enabling from free layout
-+   * applies conversion defaults unless overridden in `opts`.
-+   */
 +  updateFrameLayout: (
 +    frameId: string,
 +    opts: {
@@ -3812,30 +3873,9 @@ index b13334bf7..e2050530b 100644
 +      collapsed?: boolean;
 +    },
 +  ) => boolean;
-+  /**
-+   * Returns the current frame dimensions and layout settings.
-+   */
 +  getFrameLayout: (frameId: string) => FrameLayoutSettings | null;
-+  /**
-+   * Toggles whether a frame clips its child elements.
-+   * @param frameId - The ID of the frame to toggle clipping for
-+   * @param clip - Optional explicit value. If not provided, toggles the current state.
-+   * @returns true if the frame was found and updated, false otherwise
-+   */
-+  toggleFrameClip: (
-+    frameId: string,
-+    clip?: boolean,
-+  ) => boolean;
-+  /**
-+   * Collapses a frame to its title/top chrome header, or expands it back.
-+   * Children stay members and are clipped while collapsed.
-+   * @param frameId - The ID of the frame to update
-+   * @param collapsed - Optional explicit value. If not provided, toggles.
-+   */
-+  setFrameCollapsed: (
-+    frameId: string,
-+    collapsed?: boolean,
-+  ) => boolean;
++  toggleFrameClip: (frameId: string, clip?: boolean) => boolean;
++  setFrameCollapsed: (frameId: string, collapsed?: boolean) => boolean;
    toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
    getEditorInterface: () => EditorInterface;
    /**

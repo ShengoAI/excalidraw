@@ -193,6 +193,7 @@ export const actionFinalize = register<FormData>({
                   },
             selectionElement: null,
             suggestedBinding: null,
+            hoveredArrowTextAnchor: null,
             newElement: null,
             multiElement: null,
           },
@@ -201,9 +202,7 @@ export const actionFinalize = register<FormData>({
       }
     }
 
-    if (window.document.activeElement instanceof HTMLElement) {
-      focusContainer();
-    }
+    focusContainer();
 
     // clean up pending gesture even if active tool is already not drawShape
     const hadPendingSketch = app.drawShape.hasPendingGesture();
@@ -398,6 +397,7 @@ export const actionFinalize = register<FormData>({
         multiElement: null,
         editingTextElement: null,
         suggestedBinding: null,
+        hoveredArrowTextAnchor: null,
         frameToHighlight: null,
         selectedElementIds: isDrawShapeTool
           ? {}

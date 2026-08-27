@@ -1,5 +1,5 @@
 {
-  "name": "@ShengoAI/math",
+  "name": "@shengoai/math",
   "version": "0.18.0-alpha.16",
   "type": "module",
   "types": "./dist/types/math/src/index.d.ts",
@@ -61,6 +61,6 @@
     "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
   },
   "dependencies": {
-    "@ShengoAI/common": "0.18.0-alpha.16"
+    "@shengoai/common": "0.18.0-alpha.16"
   }
 }

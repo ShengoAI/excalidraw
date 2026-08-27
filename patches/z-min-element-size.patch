@@ -1,0 +1,183 @@
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -58,6 +58,10 @@ type _ExcalidrawElementBase = Readonly<{
+   shadow?: ElementShadow | null;
+   width: number;
+   height: number;
++  /** Optional lower width bound enforced by interactive resizing. */
++  minWidth?: number;
++  /** Optional lower height bound enforced by interactive resizing. */
++  minHeight?: number;
+   angle: Radians;
+   /** Random integer used to seed shape generation so that the roughjs shape
+       doesn't differ across renders. */
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -95,6 +95,8 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     shadow = null,
+     width = 0,
+     height = 0,
++    minWidth,
++    minHeight,
+     angle = 0 as Radians,
+     groupIds = [],
+     frameId = null,
+@@ -140,6 +142,8 @@ const _newElementBase = <T extends ExcalidrawElement>(
+     y,
+     width,
+     height,
++    ...(Number.isFinite(minWidth) && minWidth! >= 0 ? { minWidth } : {}),
++    ...(Number.isFinite(minHeight) && minHeight! >= 0 ? { minHeight } : {}),
+     angle,
+     strokeColor,
+     backgroundColor,
+diff --git a/packages/element/src/resizeElements.ts b/packages/element/src/resizeElements.ts
+--- a/packages/element/src/resizeElements.ts
++++ b/packages/element/src/resizeElements.ts
+@@ -349,6 +349,24 @@ export const resizeSingleTextElement = (
+ ) => {
+   const elementsMap = scene.getNonDeletedElementsMap();
+ 
++  const minWidth = Math.max(0, origElement.minWidth ?? 0);
++  const minHeight = Math.max(0, origElement.minHeight ?? 0);
++  const widthSign = Math.sign(nextWidth) || 1;
++  const heightSign = Math.sign(nextHeight) || 1;
++
++  if (transformHandleType.includes("n") || transformHandleType.includes("s")) {
++    const constraintScale = Math.max(
++      minWidth / Math.max(Math.abs(nextWidth), Number.EPSILON),
++      minHeight / Math.max(Math.abs(nextHeight), Number.EPSILON),
++      1,
++    );
++    nextWidth *= constraintScale;
++    nextHeight *= constraintScale;
++  } else {
++    nextWidth = widthSign * Math.max(Math.abs(nextWidth), minWidth);
++    nextHeight = heightSign * Math.max(Math.abs(nextHeight), minHeight);
++  }
++
+   const metricsWidth = element.width * (nextHeight / element.height);
+ 
+   const metrics = measureFontSizeFromWidth(element, elementsMap, metricsWidth);
+@@ -390,7 +408,7 @@ export const resizeSingleTextElement = (
+       element.lineHeight,
+     );
+ 
+-    const newWidth = Math.max(minWidth, nextWidth);
++    const newWidth = Math.max(minWidth, origElement.minWidth ?? 0, nextWidth);
+ 
+     const text = wrapText(
+       element.originalText,
+@@ -403,7 +421,7 @@ export const resizeSingleTextElement = (
+       element.lineHeight,
+     );
+ 
+-    const newHeight = metrics.height;
++    const newHeight = Math.max(metrics.height, origElement.minHeight ?? 0);
+ 
+     const previousOrigin = pointFrom<GlobalPoint>(origElement.x, origElement.y);
+ 
+@@ -421,7 +439,7 @@ export const resizeSingleTextElement = (
+ 
+     const resizedElement: Partial<NonDeleted<ExcalidrawTextElement>> = {
+       width: Math.abs(newWidth),
+-      height: Math.abs(metrics.height),
++      height: Math.abs(newHeight),
+       x: newOrigin.x,
+       y: newOrigin.y,
+       text,
+@@ -841,7 +859,24 @@ export const resizeSingleElement = (
+       shouldResizeFromCenter,
+       nextWidth,
+       nextHeight,
++    );
++  }
++
++  const minWidth = Math.max(0, origElement.minWidth ?? 0);
++  const minHeight = Math.max(0, origElement.minHeight ?? 0);
++  if (shouldMaintainAspectRatio) {
++    const constraintScale = Math.max(
++      minWidth / Math.max(Math.abs(nextWidth), Number.EPSILON),
++      minHeight / Math.max(Math.abs(nextHeight), Number.EPSILON),
++      1,
+     );
++    nextWidth *= constraintScale;
++    nextHeight *= constraintScale;
++  } else {
++    nextWidth =
++      (Math.sign(nextWidth) || 1) * Math.max(Math.abs(nextWidth), minWidth);
++    nextHeight =
++      (Math.sign(nextHeight) || 1) * Math.max(Math.abs(nextHeight), minHeight);
+   }
+ 
+   let boundTextFont: { fontSize?: number } = {};
+@@ -1440,10 +1475,31 @@ export const resizeMultipleElements = (
+           isTextElement(item.latest) ||
+           isInGroup(item.latest),
+       );
++
++    const minScaleX = targetElements.reduce(
++      (minimumScale, { orig }) =>
++        Math.max(
++          minimumScale,
++          (orig.minWidth ?? 0) / Math.max(orig.width, Number.EPSILON),
++        ),
++      0,
++    );
++    const minScaleY = targetElements.reduce(
++      (minimumScale, { orig }) =>
++        Math.max(
++          minimumScale,
++          (orig.minHeight ?? 0) / Math.max(orig.height, Number.EPSILON),
++        ),
++      0,
++    );
+ 
+     if (keepAspectRatio) {
++      scale = Math.max(scale, minScaleX, minScaleY);
+       scaleX = scale;
+       scaleY = scale;
++    } else {
++      scaleX = Math.max(scaleX, minScaleX);
++      scaleY = Math.max(scaleY, minScaleY);
+     }
+ 
+     /**
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -414,9 +414,16 @@ const repairBinding = (
+ };
+ 
+ const restoreElementWithProperties = <
+-  T extends Required<Omit<ExcalidrawElement, "customData" | "shadow">> & {
++  T extends Required<
++    Omit<
++      ExcalidrawElement,
++      "customData" | "shadow" | "minWidth" | "minHeight"
++    >
++  > & {
+     customData?: ExcalidrawElement["customData"];
+     shadow?: ExcalidrawElement["shadow"];
++    minWidth?: ExcalidrawElement["minWidth"];
++    minHeight?: ExcalidrawElement["minHeight"];
+     /** @deprecated */
+     boundElementIds?: readonly ExcalidrawElement["id"][];
+     /** @deprecated */
+@@ -458,6 +465,14 @@ const restoreElementWithProperties = <
+       element.backgroundColor || DEFAULT_ELEMENT_PROPS.backgroundColor,
+     width: element.width || 0,
+     height: element.height || 0,
++    minWidth:
++      Number.isFinite(element.minWidth) && element.minWidth! >= 0
++        ? element.minWidth
++        : undefined,
++    minHeight:
++      Number.isFinite(element.minHeight) && element.minHeight! >= 0
++        ? element.minHeight
++        : undefined,
+     seed: element.seed ?? 1,
+     groupIds: element.groupIds ?? [],
+     frameId: element.frameId ?? null,

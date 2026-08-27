@@ -346,7 +346,7 @@ index bc2cdf285..dc49eece4 100644
  export const getElementsInResizingFrame = (
    allElements: ExcalidrawElementsIncludingDeleted,
    frame: ExcalidrawFrameLikeElement,
-@@ -444,6 +650,506 @@ export const getContainingFrame = (
+@@ -444,6 +650,509 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -390,7 +390,10 @@ index bc2cdf285..dc49eece4 100644
 +};
 +
 +const isAutoLayoutMember = (element: ExcalidrawElement) =>
-+  !(isTextElement(element) && element.containerId);
++  // Exclude bound text elements (they follow their container)
++  !(isTextElement(element) && element.containerId) &&
++  // Exclude bound arrows/lines (they follow their connected shapes)
++  !("startBinding" in element && (element.startBinding || element.endBinding));
 +
 +const getAutoLayoutClusterKey = (
 +  element: ExcalidrawElement,
@@ -853,7 +856,7 @@ index bc2cdf285..dc49eece4 100644
  // --------------------------- Frame Operations -------------------------------
  
  /** */
-@@ -466,11 +1172,13 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -466,11 +1174,13 @@ export const filterElementsEligibleAsFrameChildren = (
    const eligibleElements: ExcalidrawElement[] = [];
  
    for (const element of elements) {
@@ -872,7 +875,7 @@ index bc2cdf285..dc49eece4 100644
        continue;
      }
  
-@@ -481,7 +1189,9 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -481,7 +1191,9 @@ export const filterElementsEligibleAsFrameChildren = (
          const groupElements = getElementsInGroup(elements, shallowestGroupId);
          if (
            groupElements.some((el) =>
@@ -883,7 +886,7 @@ index bc2cdf285..dc49eece4 100644
            )
          ) {
            for (const child of groupElements) {
-@@ -490,7 +1200,9 @@ export const filterElementsEligibleAsFrameChildren = (
+@@ -490,7 +1202,9 @@ export const filterElementsEligibleAsFrameChildren = (
          }
        }
      } else {
@@ -894,7 +897,7 @@ index bc2cdf285..dc49eece4 100644
        if (overlaps) {
          eligibleElements.push(element);
        }
-@@ -521,7 +1233,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
+@@ -521,7 +1235,23 @@ export const getCommonFrameId = (elements: readonly ExcalidrawElement[]) => {
  export const getFrameChildrenInsertionIndex = (
    elements: readonly ExcalidrawElement[],
    frameId: ExcalidrawFrameLikeElement["id"],
@@ -918,7 +921,7 @@ index bc2cdf285..dc49eece4 100644
    for (let index = elements.length - 1; index >= 0; index--) {
      const element = elements[index];
  
-@@ -566,11 +1294,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -566,11 +1296,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
      allElements,
      elementsToAdd,
    )) {
@@ -937,7 +940,7 @@ index bc2cdf285..dc49eece4 100644
        continue;
      }
  
-@@ -610,9 +1340,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
+@@ -610,9 +1342,13 @@ export const addElementsToFrame = <T extends ElementsMapOrArray>(
    const otherElements = Array.from(allElements.values()).filter(
      (element) => !finalElementsToAdd.has(element),
    );
@@ -951,7 +954,7 @@ index bc2cdf285..dc49eece4 100644
    );
  
    if (insertionIndex === null) {
-@@ -725,11 +1459,21 @@ export const updateFrameMembershipOfSelectedElements = <
+@@ -725,11 +1461,21 @@ export const updateFrameMembershipOfSelectedElements = <
    const elementsMap = arrayToMap(allElements);
  
    elementsToFilter.forEach((element) => {
@@ -974,7 +977,7 @@ index bc2cdf285..dc49eece4 100644
        elementsToRemove.add(element);
      }
    });
-@@ -855,6 +1599,12 @@ export const isElementInFrame = (
+@@ -855,6 +1601,12 @@ export const isElementInFrame = (
    }
  
    if (_element.groupIds.length === 0) {
@@ -987,7 +990,7 @@ index bc2cdf285..dc49eece4 100644
      return elementOverlapsWithFrame(_element, frame, allElementsMap);
    }
  
-@@ -915,10 +1665,38 @@ export const shouldApplyFrameClip = (
+@@ -915,10 +1667,38 @@ export const shouldApplyFrameClip = (
    elementsMap: ElementsMap,
    checkedGroups?: Map<string, boolean>,
  ) => {
@@ -1027,7 +1030,7 @@ index bc2cdf285..dc49eece4 100644
    // for individual elements, only clip when the element is
    // a. overlapping with the frame, or
    // b. containing the frame, for example when an element is used as a background
-@@ -968,7 +1746,7 @@ export const shouldApplyFrameClip = (
+@@ -968,7 +1748,7 @@ export const shouldApplyFrameClip = (
    return false;
  };
  

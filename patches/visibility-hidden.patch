@@ -142,7 +142,7 @@ index 10b0b34ca..df52eb329 100644
    index: FractionalIndex | null;
    isDeleted: boolean;
 +  /** When true, the element is omitted from render, hit-testing, export, and auto-layout packing. */
-+  hidden: boolean;
++  hidden?: boolean;
    /** List of groups the element belongs to.
        Ordered from deepest to shallowest. */
    groupIds: readonly GroupId[];

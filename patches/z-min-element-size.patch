@@ -148,7 +148,7 @@ diff --git a/packages/element/src/resizeElements.ts b/packages/element/src/resiz
 diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
 --- a/packages/excalidraw/data/restore.ts
 +++ b/packages/excalidraw/data/restore.ts
-@@ -414,9 +414,16 @@ const repairBinding = (
+@@ -414,9 +414,17 @@ const repairBinding = (
  };
  
  const restoreElementWithProperties = <
@@ -156,13 +156,14 @@ diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/rest
 +  T extends Required<
 +    Omit<
 +      ExcalidrawElement,
-+      "customData" | "shadow" | "minWidth" | "minHeight"
++      "customData" | "shadow" | "minWidth" | "minHeight" | "hidden"
 +    >
 +  > & {
      customData?: ExcalidrawElement["customData"];
      shadow?: ExcalidrawElement["shadow"];
 +    minWidth?: ExcalidrawElement["minWidth"];
 +    minHeight?: ExcalidrawElement["minHeight"];
++    hidden?: ExcalidrawElement["hidden"];
      /** @deprecated */
      boundElementIds?: readonly ExcalidrawElement["id"][];
      /** @deprecated */

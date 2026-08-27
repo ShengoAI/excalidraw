@@ -1,0 +1,140 @@
+diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
+index cb0c2ba32..fc72aa6ba 100644
+--- a/packages/excalidraw/renderer/staticScene.ts
++++ b/packages/excalidraw/renderer/staticScene.ts
+@@ -167,73 +167,49 @@ export const frameClip = (
+ };
+ 
+ /**
+- * Renders the background fill for frames.
+- * This is called BEFORE rendering children so that children appear on top of the background.
+- * The frame outline/stroke is rendered separately via renderElement after children.
++ * Renders the background fill for a single frame.
++ * Called inline, at the frame's z-position, so a frame brought to front
++ * occludes elements behind it. Children are still rendered after, on top.
+  */
+-const renderFrameBackgrounds = (
++const renderFrameBackground = (
+   context: CanvasRenderingContext2D,
+-  visibleElements: readonly NonDeletedExcalidrawElement[],
+-  elementsMap: ElementsMap,
++  element: NonDeleted<ExcalidrawFrameLikeElement>,
+   appState: StaticCanvasAppState,
+ ) => {
+-  if (!appState.frameRendering.enabled) {
+-    return;
+-  }
+-
+-  const elementOrder = new Map(
+-    visibleElements.map((element, index) => [element.id, index]),
++  context.save();
++  applyFrameCanvasTransform(
++    context,
++    element,
++    appState.scrollX,
++    appState.scrollY,
+   );
+-  const frameBackgrounds = visibleElements
+-    .filter(
+-      (element): element is NonDeleted<ExcalidrawFrameLikeElement> =>
+-        isFrameLikeElement(element) &&
+-        element.backgroundColor !== "transparent",
+-    )
+-    .sort((a, b) => {
+-      const depthA = getAncestorFrames(a, elementsMap).length;
+-      const depthB = getAncestorFrames(b, elementsMap).length;
+-
+-      return depthA - depthB || elementOrder.get(a.id)! - elementOrder.get(b.id)!;
+-    });
+ 
+-  // Render parent frame backgrounds before nested frame backgrounds.
+-  for (const element of frameBackgrounds) {
+-    context.save();
+-    applyFrameCanvasTransform(
+-      context,
+-      element,
+-      appState.scrollX,
+-      appState.scrollY,
+-    );
++  // Apply element opacity
++  context.globalAlpha = element.opacity / 100;
+ 
+-    // Apply element opacity
+-    context.globalAlpha = element.opacity / 100;
++  // Apply background color
++  context.fillStyle = applyDarkModeFilter(
++    element.backgroundColor,
++    appState.theme === THEME.DARK,
++  );
+ 
+-    // Apply background color
+-    context.fillStyle = applyDarkModeFilter(
+-      element.backgroundColor,
+-      appState.theme === THEME.DARK,
++  // Draw the background with rounded corners
++  if (FRAME_STYLE.radius && context.roundRect) {
++    context.beginPath();
++    context.roundRect(
++      0,
++      0,
++      element.width,
++      element.height,
++      FRAME_STYLE.radius / appState.zoom.value,
+     );
+-
+-    // Draw the background with rounded corners
+-    if (FRAME_STYLE.radius && context.roundRect) {
+-      context.beginPath();
+-      context.roundRect(
+-        0,
+-        0,
+-        element.width,
+-        element.height,
+-        FRAME_STYLE.radius / appState.zoom.value,
+-      );
+-      context.fill();
+-      context.closePath();
+-    } else {
+-      context.fillRect(0, 0, element.width, element.height);
+-    }
+-
+-    context.restore();
++    context.fill();
++    context.closePath();
++  } else {
++    context.fillRect(0, 0, element.width, element.height);
+   }
++
++  context.restore();
+ };
+ 
+ type LinkIconCanvas = HTMLCanvasElement & { zoom: number };
+@@ -384,10 +360,6 @@ const _renderStaticScene = ({
+ 
+   const inFrameGroupsMap = new Map<string, boolean>();
+ 
+-  // Render frame backgrounds FIRST, before any children
+-  // This ensures children appear on top of the frame background
+-  renderFrameBackgrounds(context, visibleElements, elementsMap, appState);
+-
+   // Paint visible elements
+   visibleElements
+     .filter((el) => !isIframeLikeElement(el))
+@@ -406,6 +378,17 @@ const _renderStaticScene = ({
+ 
+         context.save();
+ 
++        // Frame backgrounds are painted inline, at the frame's z-position,
++        // so a frame brought to front occludes elements behind it. Children
++        // (rendered after, per element order) still appear on top.
++        if (
++          isFrameLikeElement(element) &&
++          appState.frameRendering.enabled &&
++          element.backgroundColor !== "transparent"
++        ) {
++          renderFrameBackground(context, element, appState);
++        }
++
+         if (
+           frameId &&
+           appState.frameRendering.enabled &&

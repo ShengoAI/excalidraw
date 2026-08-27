@@ -1,0 +1,58 @@
+diff --git a/packages/element/src/transform.ts b/packages/element/src/transform.ts
+index 0000000..1111111 100644
+--- a/packages/element/src/transform.ts
++++ b/packages/element/src/transform.ts
+@@ -1,6 +1,7 @@
+ import { pointFrom, type LocalPoint } from "@excalidraw/math";
+ 
+ import {
++  DEFAULT_ELEMENT_PROPS,
+   DEFAULT_FONT_FAMILY,
+   DEFAULT_FONT_SIZE,
+   TEXT_ALIGN,
+@@ -230,7 +231,11 @@
+     verticalAlign: VERTICAL_ALIGN.MIDDLE,
+     ...textProps,
+     containerId: container.id,
+-    strokeColor: textProps.strokeColor || container.strokeColor,
++    strokeColor:
++      textProps.strokeColor ||
++      (container.strokeColor && container.strokeColor !== "transparent"
++        ? container.strokeColor
++        : DEFAULT_ELEMENT_PROPS.strokeColor),
+   });
+ 
+   Object.assign(container, {
+
+diff --git a/packages/excalidraw/actions/actionProperties.tsx b/packages/excalidraw/actions/actionProperties.tsx
+index 0000000..1111111 100644
+--- a/packages/excalidraw/actions/actionProperties.tsx
++++ b/packages/excalidraw/actions/actionProperties.tsx
+@@ -361,11 +361,22 @@
+           elements,
+           appState,
+           (el) => {
+-            return hasStrokeColor(el.type)
+-              ? newElementWith(el, {
+-                  strokeColor: value.currentItemStrokeColor,
+-                })
+-              : el;
++            if (!hasStrokeColor(el.type)) {
++              return el;
++            }
++            // Bound text uses strokeColor as its fill. Applying a transparent
++            // shape-border color to it makes the label invisible — keep the
++            // previous text color instead.
++            if (
++              isTextElement(el) &&
++              el.containerId &&
++              isTransparent(value.currentItemStrokeColor)
++            ) {
++              return el;
++            }
++            return newElementWith(el, {
++              strokeColor: value.currentItemStrokeColor,
++            });
+           },
+           true,
+         ),

@@ -361,7 +361,7 @@ index bc2cdf285..8d7f754b5 100644
  export const getElementsInResizingFrame = (
    allElements: ExcalidrawElementsIncludingDeleted,
    frame: ExcalidrawFrameLikeElement,
-@@ -444,6 +650,524 @@ export const getContainingFrame = (
+@@ -444,6 +650,526 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -700,9 +700,11 @@ index bc2cdf285..8d7f754b5 100644
 +      const lastEnd = frame.autoLayout === "vertical" ? last.y2 : last.x2;
 +      targetStart = lastEnd + 1 + offset;
 +    } else {
-+      const next = remaining[index];
-+      const nextStart = frame.autoLayout === "vertical" ? next.y1 : next.x1;
-+      targetStart = nextStart - itemSize - (droppedItems.length - offset);
++      // Position after the previous item, not before the next item.
++      // This ensures correct ordering even if the dropped item is large.
++      const prev = remaining[index - 1];
++      const prevEnd = frame.autoLayout === "vertical" ? prev.y2 : prev.x2;
++      targetStart = prevEnd + 1 + offset;
 +    }
 +    const currentStart = frame.autoLayout === "vertical" ? item.y1 : item.x1;
 +    const delta = targetStart - currentStart;

@@ -122,11 +122,12 @@ diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/compon
 index 29e4f7c20..239ebd59a 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -36,6 +36,9 @@ import {
+@@ -36,6 +36,10 @@ import {
    ELEMENT_TRANSLATE_AMOUNT,
    EVENT,
    FRAME_STYLE,
 +  SHAPE_FOOTER_PADDING,
++  SHAPE_TOP_CONTENT_MIN_HEIGHT,
 +  SHAPE_TOP_PADDING,
 +  SHAPE_TOP_TITLE_GAP,
    IMAGE_MIME_TYPES,
@@ -198,7 +199,7 @@ index 29e4f7c20..239ebd59a 100644
                maxWidth: `${
                  this.ownerDocument.body.clientWidth -
                  x1 -
-@@ -2276,7 +2294,8 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2276,22 +2294,44 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -208,7 +209,11 @@ index 29e4f7c20..239ebd59a 100644
              top: `${y1 - this.state.offsetTop}px`,
              left: `${x1 - this.state.offsetLeft}px`,
              transform: `rotate(${f.angle}rad)`,
-@@ -2285,13 +2304,31 @@ class App extends React.Component<AppProps, AppState> {
+             transformOrigin: "top left",
+             zIndex: 2,
++            display: "flex",
++            alignItems: "center",
++            height: `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`,
              fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
              color: getFrameNameColor(f, isDarkTheme),
              lineHeight: FRAME_STYLE.nameLineHeight,
@@ -243,7 +248,7 @@ index 29e4f7c20..239ebd59a 100644
                    }px`,
              overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
              whiteSpace: "nowrap",
-@@ -2316,6 +2353,332 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2316,6 +2375,347 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -315,6 +320,19 @@ index 29e4f7c20..239ebd59a 100644
 +    titleEl.style.left = `${x1 - this.state.offsetLeft}px`;
 +    titleEl.style.transform = `rotate(${element.angle}rad)`;
 +    titleEl.style.transformOrigin = "top left";
++    titleEl.style.display = "flex";
++    titleEl.style.alignItems = "center";
++    titleEl.style.height = `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`;
++    titleEl.style.width = `${
++      Math.max(
++        0,
++        element.width -
++          FRAME_STYLE.nameInsetX * 2 -
++          topLeftWidth -
++          titleGap -
++          topRightWidth,
++      ) * this.state.zoom.value
++    }px`;
 +    titleEl.style.maxWidth = `${
 +      Math.max(
 +        0,
@@ -491,10 +509,11 @@ index 29e4f7c20..239ebd59a 100644
 +                position: "absolute",
 +                top: 0,
 +                left: 0,
-+                padding: `${SHAPE_TOP_PADDING.top}px 0 ${SHAPE_TOP_PADDING.bottom}px ${SHAPE_TOP_PADDING.horizontal}px`,
++                height: `${SHAPE_TOP_PADDING.top + SHAPE_TOP_CONTENT_MIN_HEIGHT + SHAPE_TOP_PADDING.bottom}px`,
++                padding: `0 0 0 ${SHAPE_TOP_PADDING.horizontal}px`,
 +                boxSizing: "border-box",
 +                display: "flex",
-+                alignItems: "flex-start",
++                alignItems: "center",
 +                pointerEvents: POINTER_EVENTS.enabled,
 +              }}
 +            >
@@ -510,10 +529,11 @@ index 29e4f7c20..239ebd59a 100644
 +                position: "absolute",
 +                top: 0,
 +                right: 0,
-+                padding: `${SHAPE_TOP_PADDING.top}px ${SHAPE_TOP_PADDING.horizontal}px ${SHAPE_TOP_PADDING.bottom}px 0`,
++                height: `${SHAPE_TOP_PADDING.top + SHAPE_TOP_CONTENT_MIN_HEIGHT + SHAPE_TOP_PADDING.bottom}px`,
++                padding: `0 ${SHAPE_TOP_PADDING.horizontal}px 0 0`,
 +                boxSizing: "border-box",
 +                display: "flex",
-+                alignItems: "flex-start",
++                alignItems: "center",
 +                justifyContent: "flex-end",
 +                pointerEvents: POINTER_EVENTS.enabled,
 +              }}

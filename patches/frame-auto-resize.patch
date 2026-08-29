@@ -361,7 +361,7 @@ index bc2cdf285..8d7f754b5 100644
  export const getElementsInResizingFrame = (
    allElements: ExcalidrawElementsIncludingDeleted,
    frame: ExcalidrawFrameLikeElement,
-@@ -444,6 +650,523 @@ export const getContainingFrame = (
+@@ -444,6 +650,524 @@ export const getContainingFrame = (
      null) as null | ExcalidrawFrameLikeElement;
  };
  
@@ -566,32 +566,33 @@ index bc2cdf285..8d7f754b5 100644
 +  const items = getFrameAutoLayoutItems(frame, allElements, opts);
 +  const index = getAutoLayoutInsertIndex(items, pointer, direction);
 +  const gap = frame.autoLayoutGap ?? DEFAULT_FRAME_AUTO_LAYOUT_GAP;
-+  const fallback = 48;
++
++  const padding = {
++    horizontal:
++      frame.autoLayoutPadding?.horizontal ?? DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
++    vertical:
++      frame.autoLayoutPadding?.vertical ?? DEFAULT_FRAME_CONTENT_PADDING_Y,
++  };
++  const titleHeight = getFrameTitleReservedHeight(frame);
++  const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
++
++  // Calculate full-span bounds for the indicator
++  const fullX1 = frame.x + padding.horizontal;
++  const fullX2 = frame.x + frame.width - padding.horizontal;
++  const fullY1 = frame.y + titleHeight + padding.vertical;
++  const fullY2 = frame.y + frame.height - bottomReserve;
 +
 +  if (!items.length) {
-+    const padding = {
-+      horizontal:
-+        frame.autoLayoutPadding?.horizontal ??
-+        DEFAULT_FRAME_AUTO_LAYOUT_PADDING,
-+      vertical:
-+        frame.autoLayoutPadding?.vertical ?? DEFAULT_FRAME_CONTENT_PADDING_Y,
-+    };
-+    const titleHeight = getFrameTitleReservedHeight(frame);
 +    if (direction === "vertical") {
-+      const y = frame.y + titleHeight + padding.vertical;
-+      const x1 = frame.x + padding.horizontal;
-+      return { x1, y1: y, x2: x1 + fallback, y2: y };
++      const y = fullY1;
++      return { x1: fullX1, y1: y, x2: fullX2, y2: y };
 +    }
-+    const x = frame.x + padding.horizontal;
-+    const y1 = frame.y + titleHeight + padding.vertical;
-+    return { x1: x, y1, x2: x, y2: y1 + fallback };
++    const x = fullX1;
++    return { x1: x, y1: fullY1, x2: x, y2: fullY2 };
 +  }
 +
 +  const prev = index > 0 ? items[index - 1] : null;
 +  const next = index < items.length ? items[index] : null;
-+  const neighbors = [prev, next].filter(
-+    (item): item is FrameAutoLayoutItem => item != null,
-+  );
 +
 +  if (direction === "vertical") {
 +    const y = next
@@ -600,9 +601,9 @@ index bc2cdf285..8d7f754b5 100644
 +        : next.y1 - gap / 2
 +      : prev!.y2 + gap / 2;
 +    return {
-+      x1: Math.min(...neighbors.map((item) => item.x1)),
++      x1: fullX1,
 +      y1: y,
-+      x2: Math.max(...neighbors.map((item) => item.x2)),
++      x2: fullX2,
 +      y2: y,
 +    };
 +  }
@@ -614,9 +615,9 @@ index bc2cdf285..8d7f754b5 100644
 +    : prev!.x2 + gap / 2;
 +  return {
 +    x1: x,
-+    y1: Math.min(...neighbors.map((item) => item.y1)),
++    y1: fullY1,
 +    x2: x,
-+    y2: Math.max(...neighbors.map((item) => item.y2)),
++    y2: fullY2,
 +  };
 +};
 +

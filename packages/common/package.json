@@ -1,6 +1,6 @@
 {
   "name": "@shengoai/common",
-  "version": "0.18.0-alpha.20",
+  "version": "0.18.0-alpha.21",
   "type": "module",
   "types": "./dist/types/common/src/index.d.ts",
   "main": "./dist/prod/index.js",

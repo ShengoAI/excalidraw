@@ -1,6 +1,6 @@
 {
   "name": "@shengoai/element",
-  "version": "0.18.0-alpha.20",
+  "version": "0.18.0-alpha.21",
   "type": "module",
   "types": "./dist/types/element/src/index.d.ts",
   "main": "./dist/prod/index.js",
@@ -63,8 +63,8 @@
     "build:esm": "rimraf dist && node ../../scripts/buildBase.js && yarn gen:types"
   },
   "dependencies": {
-    "@shengoai/common": "0.18.0-alpha.20",
-    "@shengoai/math": "0.18.0-alpha.20",
+    "@shengoai/common": "0.18.0-alpha.21",
+    "@shengoai/math": "0.18.0-alpha.21",
     "@shengoai/fractional-indexing": "3.3.0"
   }
 }

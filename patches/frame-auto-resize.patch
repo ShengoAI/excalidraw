@@ -2220,7 +2220,7 @@ index 2efd69137..8fa272020 100644
        elementsToHighlight: null,
        snapLines: [],
        showHyperlinkPopup: false,
-@@ -5188,6 +5214,232 @@ class App extends React.Component<AppProps, AppState> {
+@@ -5188,6 +5214,235 @@ class App extends React.Component<AppProps, AppState> {
      this.setState({ toast });
    };
  
@@ -2446,6 +2446,9 @@ index 2efd69137..8fa272020 100644
 +      });
 +    }
 +
++    // Height change moves the bindable edge; recompute arrows bound to the frame.
++    updateBoundElements(frame, this.scene);
++
 +    this.scene.triggerUpdate();
 +    return true;
 +  };
@@ -2453,7 +2456,7 @@ index 2efd69137..8fa272020 100644
    restoreFileFromShare = async () => {
      try {
        const webShareTargetCache = await caches.open("web-share-target");
-@@ -6261,6 +6513,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -6261,6 +6516,7 @@ class App extends React.Component<AppProps, AppState> {
            ? prevState.selectedLinearElement
            : null,
          frameToHighlight: null,
@@ -2461,7 +2464,7 @@ index 2efd69137..8fa272020 100644
          // only the text tool offers arrow-endpoint binding, and the highlight
          // is refreshed on pointermove — don't leave a stale one behind
          hoveredArrowTextAnchor: null,
-@@ -6771,12 +7024,33 @@ class App extends React.Component<AppProps, AppState> {
+@@ -6771,12 +7027,33 @@ class App extends React.Component<AppProps, AppState> {
          if (containingFrame && !isNonDeletedElement(containingFrame)) {
            console.error("[NONDELETED][INVARIANT] Containing frame is deleted");
          }
@@ -2501,7 +2504,7 @@ index 2efd69137..8fa272020 100644
            ? isCursorInFrame(
                { x, y },
                containingFrame as NonDeleted<ExcalidrawFrameLikeElement>,
-@@ -7734,9 +8008,23 @@ class App extends React.Component<AppProps, AppState> {
+@@ -7734,9 +8011,23 @@ class App extends React.Component<AppProps, AppState> {
  
    private updateFrameToHighlight = (
      frameToHighlight: AppState["frameToHighlight"],
@@ -2527,7 +2530,7 @@ index 2efd69137..8fa272020 100644
      }
    };
  
-@@ -11036,17 +11324,45 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11036,17 +11327,45 @@ class App extends React.Component<AppProps, AppState> {
            return;
          }
  
@@ -2582,7 +2585,7 @@ index 2efd69137..8fa272020 100644
  
          // Marking that click was used for dragging to check
          // if elements should be deselected on pointerup
-@@ -11725,6 +12041,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -11725,6 +12044,7 @@ class App extends React.Component<AppProps, AppState> {
          resizingElement: null,
          selectionElement: null,
          frameToHighlight: null,
@@ -2590,7 +2593,7 @@ index 2efd69137..8fa272020 100644
          elementsToHighlight: null,
          cursorButton: "up",
          snapLines: updateStable(prevState.snapLines, []),
-@@ -12128,6 +12445,18 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12128,6 +12448,18 @@ class App extends React.Component<AppProps, AppState> {
              isDragging: false,
            },
          );
@@ -2609,7 +2612,7 @@ index 2efd69137..8fa272020 100644
          // the above does not guarantee the scene to be rendered again, hence the trigger below
          this.scene.triggerUpdate();
        }
-@@ -12230,9 +12559,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12230,9 +12562,16 @@ class App extends React.Component<AppProps, AppState> {
              topLayerFrame &&
              !this.state.selectedElementIds[topLayerFrame.id]
            ) {
@@ -2629,7 +2632,7 @@ index 2efd69137..8fa272020 100644
  
              if (this.state.editingGroupId) {
                updateGroupIdsAfterEditingGroup(elementsToAdd);
-@@ -12261,7 +12597,27 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12261,7 +12600,27 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -2657,7 +2660,7 @@ index 2efd69137..8fa272020 100644
          }
        }
  
-@@ -12279,32 +12635,15 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12279,32 +12638,15 @@ class App extends React.Component<AppProps, AppState> {
          });
        }
  
@@ -2697,7 +2700,7 @@ index 2efd69137..8fa272020 100644
        }
  
        // Code below handles selection when element(s) weren't
-@@ -13805,29 +14144,6 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13805,29 +14147,6 @@ class App extends React.Component<AppProps, AppState> {
          pointerDownState.resize.center.y,
        )
      ) {
@@ -2727,7 +2730,7 @@ index 2efd69137..8fa272020 100644
        return true;
      }
      return false;
-@@ -13903,6 +14219,10 @@ class App extends React.Component<AppProps, AppState> {
+@@ -13903,6 +14222,10 @@ class App extends React.Component<AppProps, AppState> {
        actionSelectAllElementsInFrame,
        actionRemoveAllElementsFromFrame,
        actionWrapSelectionInFrame,

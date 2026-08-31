@@ -53,7 +53,7 @@ index b0e351b9e..c4f588a31 100644
  export const DEFAULT_FONT_SIZE = 20;
  export const DEFAULT_FONT_FAMILY: FontFamilyValues = FONT_FAMILY.Excalifont;
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index 8d7f754b5..de10b277e 100644
+index df7213ec7..3a0edeae3 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
 @@ -2,6 +2,8 @@ import {
@@ -109,7 +109,7 @@ index 8d7f754b5..de10b277e 100644
    };
  };
  
-@@ -1060,7 +1073,7 @@ export const layoutFrameChildren = (
+@@ -1063,7 +1076,7 @@ export const layoutFrameChildren = (
    }
  
    const titleHeight = getFrameTitleReservedHeight(frame);
@@ -119,7 +119,7 @@ index 8d7f754b5..de10b277e 100644
    const contentFrameHeight =
      contentHeight + titleHeight + padding.vertical + bottomReserve;
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index 29e4f7c20..239ebd59a 100644
+index fd98ece1a..5ad275dd1 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -36,6 +36,10 @@ import {
@@ -133,7 +133,7 @@ index 29e4f7c20..239ebd59a 100644
    IMAGE_MIME_TYPES,
    IMAGE_RENDER_TIMEOUT,
    LINE_CONFIRM_THRESHOLD,
-@@ -184,6 +187,8 @@ import {
+@@ -184,6 +188,8 @@ import {
    getElementsInResizingFrame,
    getElementsInNewFrame,
    getContainingFrame,
@@ -142,7 +142,7 @@ index 29e4f7c20..239ebd59a 100644
    elementOverlapsWithFrame,
    updateFrameMembershipOfSelectedElements,
    isElementInFrame,
-@@ -269,6 +274,7 @@ import {
+@@ -269,6 +275,7 @@ import {
    inferFrameAutoLayoutDirection,
    getFrameNameColor,
    getFrameNameFontSize,
@@ -150,7 +150,7 @@ index 29e4f7c20..239ebd59a 100644
    getCollapsedFrameHeight,
    getAutoLayoutDropIndicator,
    positionAutoLayoutDrop,
-@@ -688,6 +694,16 @@ class App extends React.Component<AppProps, AppState> {
+@@ -688,6 +695,16 @@ class App extends React.Component<AppProps, AppState> {
    public files: BinaryFiles = {};
    public imageCache: AppClassProperties["imageCache"] = new Map();
    private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
@@ -167,7 +167,7 @@ index 29e4f7c20..239ebd59a 100644
    /**
     * Indicates whether the embeddable's url has been validated for rendering.
     * If value not set, indicates that the validation is pending.
-@@ -2198,14 +2214,12 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2198,30 +2215,47 @@ class App extends React.Component<AppProps, AppState> {
          return null;
        }
  
@@ -175,31 +175,117 @@ index 29e4f7c20..239ebd59a 100644
 -        pointFrom(f.x + FRAME_STYLE.nameInsetX, f.y + FRAME_STYLE.nameInsetY),
 -        pointFrom(f.x + f.width / 2, f.y + f.height / 2),
 -        f.angle,
--      );
++      const { topLeftWidth, topRightWidth, titleGap } =
++        this.getFrameNameChromeOffset(f);
++      const nameAlign = this.getFrameNameEffectiveTextAlign(
++        f,
++        topLeftWidth,
++        topRightWidth,
+       );
 -      const { x: x1, y: y1 } = sceneCoordsToViewportCoords(
 -        { sceneX: titleSceneX, sceneY: titleSceneY },
 -        this.state,
-+      const { topLeftWidth, topRightWidth, titleGap } =
-+        this.getFrameNameChromeOffset(f);
 +      const { x: x1, y: y1 } = this.getFrameNameViewportOrigin(
 +        f,
 +        topLeftWidth,
 +        titleGap,
        );
  
-       const FRAME_NAME_EDIT_PADDING = 6;
-@@ -2252,6 +2266,10 @@ class App extends React.Component<AppProps, AppState> {
-               transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
-               color: getFrameNameColor(f, isDarkTheme),
+-      const FRAME_NAME_EDIT_PADDING = 6;
+-
+       let frameNameJSX;
+ 
+       const frameName = getFrameLikeTitle(f);
++      const titleWrapStyle: React.CSSProperties = {
++        minWidth: 0,
++        width: "100%",
++        whiteSpace: "pre-wrap",
++        overflowWrap: "anywhere",
++        wordBreak: "break-word",
++      };
+ 
+       if (f.id === this.state.editingFrame) {
+         const frameNameInEdit = frameName;
+ 
+         frameNameJSX = (
+-          <input
++          <textarea
+             autoFocus
+             value={frameNameInEdit}
++            rows={1}
++            ref={(el) => {
++              if (el) {
++                el.style.height = "auto";
++                el.style.height = `${el.scrollHeight}px`;
++              }
++            }}
+             onChange={(e) => {
++              e.target.style.height = "auto";
++              e.target.style.height = `${e.target.scrollHeight}px`;
+               this.scene.mutateElement(f, {
+                 name: e.target.value,
+               });
+@@ -2232,33 +2266,33 @@ class App extends React.Component<AppProps, AppState> {
+               // for some inexplicable reason, `onBlur` triggered on ESC
+               // does not reset `state.editingFrame` despite being called,
+               // and we need to reset it here as well
+-              if (event.key === KEYS.ESCAPE || event.key === KEYS.ENTER) {
++              if (event.key === KEYS.ESCAPE) {
++                this.resetEditingFrame(f);
++              }
++              // Keep Enter from inserting a newline; wrap is visual.
++              if (event.key === KEYS.ENTER) {
++                event.preventDefault();
+                 this.resetEditingFrame(f);
+               }
+             }}
+             style={{
+-              background: applyDarkModeFilter(
+-                this.state.viewBackgroundColor,
+-                isDarkTheme,
+-              ),
++              ...titleWrapStyle,
++              background: "transparent",
+               zIndex: 2,
+               border: "none",
++              outline: "none",
++              boxShadow: "none",
+               display: "block",
+-              padding: `${FRAME_NAME_EDIT_PADDING}px`,
+-              borderRadius: 4,
+-              boxShadow: "inset 0 0 0 1px var(--color-primary)",
++              padding: 0,
++              margin: 0,
++              resize: "none",
+               fontFamily: "Assistant",
+-              fontSize: `${getFrameNameFontSize(f) * this.state.zoom.value}px`,
+-              transform: `translate(-${FRAME_NAME_EDIT_PADDING}px, ${FRAME_NAME_EDIT_PADDING}px)`,
+-              color: getFrameNameColor(f, isDarkTheme),
++              fontSize: "inherit",
++              lineHeight: "inherit",
++              color: "inherit",
                overflow: "hidden",
-+              width: "100%",
-+              textAlign: getFrameNameTextAlign(
-+                f,
-+              ) as React.CSSProperties["textAlign"],
-               maxWidth: `${
-                 this.ownerDocument.body.clientWidth -
-                 x1 -
-@@ -2276,22 +2294,44 @@ class App extends React.Component<AppProps, AppState> {
+-              maxWidth: `${
+-                this.ownerDocument.body.clientWidth -
+-                x1 -
+-                FRAME_NAME_EDIT_PADDING
+-              }px`,
++              textAlign: nameAlign as React.CSSProperties["textAlign"],
+             }}
+-            size={frameNameInEdit.length + 1 || 1}
+             dir="auto"
+             autoComplete="off"
+             autoCapitalize="off"
+@@ -2266,7 +2300,7 @@ class App extends React.Component<AppProps, AppState> {
+           />
+         );
+       } else {
+-        frameNameJSX = frameName;
++        frameNameJSX = <span style={titleWrapStyle}>{frameName}</span>;
+       }
+ 
+       return (
+@@ -2276,26 +2310,54 @@ class App extends React.Component<AppProps, AppState> {
            key={f.id}
            style={{
              position: "absolute",
@@ -213,7 +299,14 @@ index 29e4f7c20..239ebd59a 100644
              zIndex: 2,
 +            display: "flex",
 +            alignItems: "center",
-+            height: `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`,
++            justifyContent:
++              nameAlign === "center"
++                ? "center"
++                : nameAlign === "right"
++                ? "flex-end"
++                : "flex-start",
++            minHeight: `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`,
++            height: "auto",
              fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
              color: getFrameNameColor(f, isDarkTheme),
              lineHeight: FRAME_STYLE.nameLineHeight,
@@ -228,9 +321,7 @@ index 29e4f7c20..239ebd59a 100644
 +                  topRightWidth,
 +              ) * this.state.zoom.value
 +            }px`,
-+            textAlign: getFrameNameTextAlign(
-+              f,
-+            ) as React.CSSProperties["textAlign"],
++            textAlign: nameAlign as React.CSSProperties["textAlign"],
              maxWidth:
                focusedSearchMatch?.id === f.id && focusedSearchMatch?.focus
                  ? "none"
@@ -246,9 +337,17 @@ index 29e4f7c20..239ebd59a 100644
 +                        topRightWidth,
 +                    ) * this.state.zoom.value
                    }px`,
-             overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
-             whiteSpace: "nowrap",
-@@ -2316,6 +2375,347 @@ class App extends React.Component<AppProps, AppState> {
+-            overflow: f.id === this.state.editingFrame ? "visible" : "hidden",
+-            whiteSpace: "nowrap",
+-            textOverflow: "ellipsis",
++            overflow: "visible",
++            whiteSpace: "pre-wrap",
++            overflowWrap: "anywhere",
++            wordBreak: "break-word",
+             cursor: CURSOR_TYPE.MOVE,
+             pointerEvents: this.state.viewModeEnabled
+               ? POINTER_EVENTS.disabled
+@@ -2316,6 +2378,377 @@ class App extends React.Component<AppProps, AppState> {
      });
    };
  
@@ -258,6 +357,19 @@ index 29e4f7c20..239ebd59a 100644
 +    const topRightWidth = chromeSlots?.topRight ?? 0;
 +    const titleGap = topLeftWidth > 0 ? SHAPE_TOP_TITLE_GAP : 0;
 +    return { topLeftWidth, topRightWidth, titleGap };
++  };
++
++  /** Center the in-frame title only when both top chrome slots are present. */
++  private getFrameNameEffectiveTextAlign = (
++    frame: ExcalidrawFrameLikeElement,
++    topLeftWidth: number,
++    topRightWidth: number,
++  ) => {
++    const requested = getFrameNameTextAlign(frame);
++    if (requested === "center" && !(topLeftWidth > 0 && topRightWidth > 0)) {
++      return "left";
++    }
++    return requested;
 +  };
 +
 +  private getFrameNameViewportOrigin = (
@@ -310,6 +422,11 @@ index 29e4f7c20..239ebd59a 100644
 +
 +    const { topLeftWidth, topRightWidth, titleGap } =
 +      this.getFrameNameChromeOffset(element);
++    const nameAlign = this.getFrameNameEffectiveTextAlign(
++      element,
++      topLeftWidth,
++      topRightWidth,
++    );
 +    const { x: x1, y: y1 } = this.getFrameNameViewportOrigin(
 +      element,
 +      topLeftWidth,
@@ -322,7 +439,19 @@ index 29e4f7c20..239ebd59a 100644
 +    titleEl.style.transformOrigin = "top left";
 +    titleEl.style.display = "flex";
 +    titleEl.style.alignItems = "center";
-+    titleEl.style.height = `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`;
++    titleEl.style.justifyContent =
++      nameAlign === "center"
++        ? "center"
++        : nameAlign === "right"
++        ? "flex-end"
++        : "flex-start";
++    titleEl.style.textAlign = nameAlign;
++    titleEl.style.minHeight = `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`;
++    titleEl.style.height = "auto";
++    titleEl.style.overflow = "visible";
++    titleEl.style.whiteSpace = "pre-wrap";
++    titleEl.style.overflowWrap = "anywhere";
++    titleEl.style.wordBreak = "break-word";
 +    titleEl.style.width = `${
 +      Math.max(
 +        0,
@@ -596,7 +725,7 @@ index 29e4f7c20..239ebd59a 100644
    private toggleOverscrollBehavior = (event: React.PointerEvent) => {
      // when pointer inside editor, disable overscroll behavior to prevent
      // panning to trigger history back/forward on MacOS Chrome
-@@ -2705,6 +3068,7 @@ class App extends React.Component<AppProps, AppState> {
+@@ -2705,6 +3138,7 @@ class App extends React.Component<AppProps, AppState> {
                                />
                              )}
                            {this.renderFrameNames()}

@@ -1,0 +1,14 @@
+diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
+index 0d13a3cf1..db0fccb63 100644
+--- a/packages/excalidraw/renderer/interactiveScene.ts
++++ b/packages/excalidraw/renderer/interactiveScene.ts
+@@ -1699,7 +1699,8 @@ const _renderInteractiveScene = ({
+     const textElement = allElementsMap.get(appState.editingTextElement.id) as
+       | NonDeleted<ExcalidrawTextElement>
+       | undefined;
+-    if (textElement) {
++    // Bound text already has the container as its visual frame.
++    if (textElement && !isBoundToContainer(textElement)) {
+       // Use custom color from getSelectionColorForElement if available
+       const customColor = renderConfig.getSelectionColorForElement?.(
+         textElement,

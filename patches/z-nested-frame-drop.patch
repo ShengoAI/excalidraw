@@ -1,0 +1,146 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index d88c69004..a8303d45d 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -8484,11 +8484,29 @@ class App extends React.Component<AppProps, AppState> {
+     },
+   ) => {
+     const elementsMap = this.scene.getNonDeletedElementsMap();
++    const isExcludedDragTarget = (element: ExcalidrawElement) => {
++      if (!opts?.excludeElementIds) {
++        return false;
++      }
++      if (opts.excludeElementIds[element.id]) {
++        return true;
++      }
++      let ancestorId = element.frameId;
++      while (ancestorId) {
++        if (opts.excludeElementIds[ancestorId]) {
++          return true;
++        }
++        ancestorId = elementsMap.get(ancestorId)?.frameId ?? null;
++      }
++      return false;
++    };
+     const framesUnderCursor = this.scene
+       .getNonDeletedFramesLikes()
+       .filter(
+         (frame) =>
+-          !frame.locked && isCursorInFrame(sceneCoords, frame, elementsMap),
++          !frame.locked &&
++          !isExcludedDragTarget(frame) &&
++          isCursorInFrame(sceneCoords, frame, elementsMap),
+       );
+ 
+     if (!framesUnderCursor.length) {
+@@ -8503,7 +8521,7 @@ class App extends React.Component<AppProps, AppState> {
+       {
+         includeLockedElements: true,
+       },
+-    ).findLast((element) => !opts?.excludeElementIds?.[element.id]);
++    ).findLast((element) => !isExcludedDragTarget(element));
+ 
+     if (hitElement) {
+       if (
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 22e406e73..18e3c355d 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -694,6 +694,97 @@ describe("adding elements to frames", () => {
+       expect(rect2.frameId).toBe(frame.id);
+     });
+ 
++    it("should nest a smaller frame fully dropped inside a larger frame", () => {
++      const largeFrame = API.createElement({
++        id: "largeFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 400,
++        height: 400,
++      });
++      const smallFrame = API.createElement({
++        id: "smallFrame",
++        type: "frame",
++        x: 500,
++        y: 0,
++        width: 80,
++        height: 80,
++      });
++
++      API.setElements([largeFrame, smallFrame]);
++
++      dragElementIntoFrame(largeFrame, smallFrame);
++
++      expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
++    });
++
++    it("should nest a smaller frame that has children when fully dropped inside a larger frame", () => {
++      const largeFrame = API.createElement({
++        id: "largeFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 400,
++        height: 400,
++      });
++      const smallFrame = API.createElement({
++        id: "smallFrame",
++        type: "frame",
++        x: 500,
++        y: 0,
++        width: 80,
++        height: 80,
++      });
++      const child = API.createElement({
++        id: "smallFrameChild",
++        type: "rectangle",
++        x: 510,
++        y: 10,
++        width: 20,
++        height: 20,
++        frameId: smallFrame.id,
++      });
++
++      API.setElements([largeFrame, smallFrame, child]);
++
++      dragElementIntoFrame(largeFrame, smallFrame);
++
++      expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
++    });
++
++    it("should not nest a smaller frame that is only overlapping the larger frame", () => {
++      const largeFrame = API.createElement({
++        id: "largeFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 150,
++        height: 150,
++      });
++      const smallFrame = API.createElement({
++        id: "smallFrame",
++        type: "frame",
++        x: 200,
++        y: 0,
++        width: 80,
++        height: 80,
++      });
++
++      API.setElements([largeFrame, smallFrame]);
++
++      mouse.clickAt(smallFrame.x, smallFrame.y);
++      mouse.downAt(
++        smallFrame.x + smallFrame.width / 2,
++        smallFrame.y + smallFrame.height / 2,
++      );
++      // Drop so the small frame overlaps but is not fully inside.
++      mouse.moveTo(largeFrame.x + largeFrame.width - 10, largeFrame.y + 40);
++      mouse.up();
++
++      expect(API.getElement(smallFrame).frameId).toBe(null);
++    });
++
+     it("should move an element dragged from one frame into another", () => {
+       const otherFrame = API.createElement({
+         id: "otherFrame",

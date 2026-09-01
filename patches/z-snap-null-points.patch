@@ -1,0 +1,198 @@
+diff --git a/packages/excalidraw/renderer/renderSnaps.ts b/packages/excalidraw/renderer/renderSnaps.ts
+index dd131f779..02e6f5fe1 100644
+--- a/packages/excalidraw/renderer/renderSnaps.ts
++++ b/packages/excalidraw/renderer/renderSnaps.ts
+@@ -2,7 +2,11 @@ import { pointFrom, type GlobalPoint, type LocalPoint } from "@excalidraw/math";
+ 
+ import { THEME } from "@excalidraw/common";
+ 
+-import type { PointSnapLine, PointerSnapLine } from "../snapping";
++import {
++  isValidSnapPoint,
++  type PointSnapLine,
++  type PointerSnapLine,
++} from "../snapping";
+ import type { InteractiveCanvasAppState } from "../types";
+ 
+ const SNAP_COLOR_LIGHT = "#ff6b6b";
+@@ -40,6 +44,12 @@ export const renderSnaps = (
+ 
+       drawPointerSnapLine(snapLine, context, appState);
+     } else if (snapLine.type === "gap") {
++      if (
++        !isValidSnapPoint(snapLine.points[0]) ||
++        !isValidSnapPoint(snapLine.points[1])
++      ) {
++        continue;
++      }
+       context.lineWidth = snapWidth;
+       context.strokeStyle = snapColor;
+ 
+@@ -65,14 +75,16 @@ const drawPointsSnapLine = (
+   context: CanvasRenderingContext2D,
+   appState: InteractiveCanvasAppState,
+ ) => {
+-  if (!appState.zenModeEnabled) {
+-    const firstPoint = pointSnapLine.points[0];
+-    const lastPoint = pointSnapLine.points[pointSnapLine.points.length - 1];
++  const points = pointSnapLine.points.filter(isValidSnapPoint);
++
++  if (!appState.zenModeEnabled && points.length >= 2) {
++    const firstPoint = points[0];
++    const lastPoint = points[points.length - 1];
+ 
+     drawLine(firstPoint, lastPoint, context);
+   }
+ 
+-  for (const point of pointSnapLine.points) {
++  for (const point of points) {
+     drawCross(point, appState, context);
+   }
+ };
+@@ -82,9 +94,14 @@ const drawPointerSnapLine = (
+   context: CanvasRenderingContext2D,
+   appState: InteractiveCanvasAppState,
+ ) => {
+-  drawCross(pointerSnapLine.points[0], appState, context);
+-  if (!appState.zenModeEnabled) {
+-    drawLine(pointerSnapLine.points[0], pointerSnapLine.points[1], context);
++  const from = pointerSnapLine.points[0];
++  const to = pointerSnapLine.points[1];
++  if (!isValidSnapPoint(from)) {
++    return;
++  }
++  drawCross(from, appState, context);
++  if (!appState.zenModeEnabled && isValidSnapPoint(to)) {
++    drawLine(from, to, context);
+   }
+ };
+ 
+diff --git a/packages/excalidraw/snapping.ts b/packages/excalidraw/snapping.ts
+index c0e22a99c..fcb373b5a 100644
+--- a/packages/excalidraw/snapping.ts
++++ b/packages/excalidraw/snapping.ts
+@@ -195,6 +195,17 @@ export const areRoughlyEqual = (a: number, b: number, precision = 0.01) => {
+   return Math.abs(a - b) <= precision;
+ };
+ 
++export const isValidSnapPoint = (
++  point: unknown,
++): point is GlobalPoint => {
++  return (
++    Array.isArray(point) &&
++    point.length >= 2 &&
++    Number.isFinite(point[0]) &&
++    Number.isFinite(point[1])
++  );
++};
++
+ export const getElementsCorners = (
+   elements: readonly NonDeletedExcalidrawElement[],
+   elementsMap: ElementsMap,
+@@ -309,7 +320,9 @@ export const getElementsCorners = (
+       : [topLeft, topRight, bottomLeft, bottomRight, center];
+   }
+ 
+-  return result.map((p) => pointFrom(round(p[0]), round(p[1])));
++  return result
++    .filter(isValidSnapPoint)
++    .map((p) => pointFrom(round(p[0]), round(p[1])));
+ };
+ 
+ const getReferenceElements = (
+@@ -376,6 +389,13 @@ export const getVisibleGaps = (
+           rangeInclusive(endMinY, endMaxY),
+         )
+       ) {
++        const overlap = rangeIntersection(
++          rangeInclusive(startMinY, startMaxY),
++          rangeInclusive(endMinY, endMaxY),
++        );
++        if (!overlap) {
++          continue;
++        }
+         horizontalGaps.push({
+           startBounds,
+           endBounds,
+@@ -385,10 +405,7 @@ export const getVisibleGaps = (
+           ],
+           endSide: [pointFrom(endMinX, endMinY), pointFrom(endMinX, endMaxY)],
+           length: endMinX - startMaxX,
+-          overlap: rangeIntersection(
+-            rangeInclusive(startMinY, startMaxY),
+-            rangeInclusive(endMinY, endMaxY),
+-          )!,
++          overlap,
+         });
+       }
+     }
+@@ -419,6 +436,13 @@ export const getVisibleGaps = (
+           rangeInclusive(endMinX, endMaxX),
+         )
+       ) {
++        const overlap = rangeIntersection(
++          rangeInclusive(startMinX, startMaxX),
++          rangeInclusive(endMinX, endMaxX),
++        );
++        if (!overlap) {
++          continue;
++        }
+         verticalGaps.push({
+           startBounds,
+           endBounds,
+@@ -428,10 +452,7 @@ export const getVisibleGaps = (
+           ],
+           endSide: [pointFrom(endMinX, endMinY), pointFrom(endMaxX, endMinY)],
+           length: endMinY - startMaxY,
+-          overlap: rangeIntersection(
+-            rangeInclusive(startMinX, startMaxX),
+-            rangeInclusive(endMinX, endMaxX),
+-          )!,
++          overlap,
+         });
+       }
+     }
+@@ -653,7 +674,13 @@ const getPointSnaps = (
+ 
+   if (referenceSnapPoints) {
+     for (const thisSnapPoint of selectionSnapPoints) {
++      if (!isValidSnapPoint(thisSnapPoint)) {
++        continue;
++      }
+       for (const otherSnapPoint of referenceSnapPoints) {
++        if (!isValidSnapPoint(otherSnapPoint)) {
++          continue;
++        }
+         const offsetX = otherSnapPoint[0] - thisSnapPoint[0];
+         const offsetY = otherSnapPoint[1] - thisSnapPoint[1];
+ 
+@@ -815,6 +842,9 @@ const dedupePoints = (points: GlobalPoint[]): GlobalPoint[] => {
+   const map = new Map<string, GlobalPoint>();
+ 
+   for (const point of points) {
++    if (!isValidSnapPoint(point)) {
++      continue;
++    }
+     const key = point.join(",");
+ 
+     if (!map.has(key)) {
+@@ -925,6 +955,9 @@ const createGapSnapLines = (
+   const gapSnapLines: GapSnapLine[] = [];
+ 
+   for (const gapSnap of gapSnaps) {
++    if (!gapSnap.gap.overlap) {
++      continue;
++    }
+     const [startMinX, startMinY, startMaxX, startMaxY] =
+       gapSnap.gap.startBounds;
+     const [endMinX, endMinY, endMaxX, endMaxY] = gapSnap.gap.endBounds;
+@@ -1350,6 +1383,9 @@ export const getSnapLinesAtPointer = (
+     const corners = getElementsCorners([referenceElement], elementsMap);
+ 
+     for (const corner of corners) {
++      if (!isValidSnapPoint(corner)) {
++        continue;
++      }
+       const offsetX = corner[0] - pointer.x;
+ 
+       if (Math.abs(offsetX) <= Math.abs(minOffset.x)) {

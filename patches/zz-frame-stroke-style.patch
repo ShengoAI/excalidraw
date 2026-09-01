@@ -1,0 +1,378 @@
+diff --git a/packages/element/src/comparisons.ts b/packages/element/src/comparisons.ts
+index ea4fc7f2a..367cb7806 100644
+--- a/packages/element/src/comparisons.ts
++++ b/packages/element/src/comparisons.ts
+@@ -42,7 +42,9 @@ export const hasStrokeStyle = (type: ElementOrToolType) =>
+   type === "diamond" ||
+   type === "arrow" ||
+   type === "line" ||
+-  type === "autoshape";
++  type === "autoshape" ||
++  type === "frame" ||
++  type === "magicframe";
+ 
+ export const hasFreedrawMode = (type: ElementOrToolType) => type === "freedraw";
+ 
+diff --git a/packages/element/src/shape.ts b/packages/element/src/shape.ts
+index 4e7c74753..6dbdbe52e 100644
+--- a/packages/element/src/shape.ts
++++ b/packages/element/src/shape.ts
+@@ -26,6 +26,7 @@ import {
+   LINE_POLYGON_POINT_MERGE_DISTANCE,
+   applyDarkModeFilter,
+   DEFAULT_STROKE_STREAMLINE,
++  FRAME_STYLE,
+ } from "@excalidraw/common";
+ 
+ import { RoughGenerator } from "roughjs/bin/generator";
+@@ -50,6 +51,7 @@ import {
+   canBecomePolygon,
+   isElbowArrow,
+   isEmbeddableElement,
++  isFrameLikeElement,
+   isIframeElement,
+   isIframeLikeElement,
+   isLinearElement,
+@@ -168,6 +170,24 @@ const getDashArrayDashed = (strokeWidth: number) => [8, 8 + strokeWidth];
+ 
+ const getDashArrayDotted = (strokeWidth: number) => [1.5, 6 + strokeWidth];
+ 
++export const filterDrawableSets = (
++  drawable: Drawable,
++  setTypes: Drawable["sets"][number]["type"][],
++): Drawable => ({
++  ...drawable,
++  sets: drawable.sets.filter((set) => setTypes.includes(set.type)),
++});
++
++const getRoundedRectPath = (width: number, height: number, r: number) => {
++  const w = width;
++  const h = height;
++  return `M ${r} 0 L ${w - r} 0 Q ${w} 0, ${w} ${r} L ${w} ${
++    h - r
++  } Q ${w} ${h}, ${w - r} ${h} L ${r} ${h} Q 0 ${h}, 0 ${
++    h - r
++  } L 0 ${r} Q 0 0, ${r} 0`;
++};
++
+ function adjustRoughness(element: ExcalidrawElement): number {
+   const roughness = element.roughness;
+ 
+@@ -229,7 +249,9 @@ export const generateRoughOptions = (
+     case "iframe":
+     case "embeddable":
+     case "diamond":
+-    case "ellipse": {
++    case "ellipse":
++    case "frame":
++    case "magicframe": {
+       options.fillStyle = element.fillStyle;
+       options.fill = isTransparent(element.backgroundColor)
+         ? undefined
+@@ -237,6 +259,12 @@ export const generateRoughOptions = (
+       if (element.type === "ellipse") {
+         options.curveFitting = 1;
+       }
++      if (element.type === "magicframe") {
++        options.stroke = isDarkMode
++          ? applyDarkModeFilter("#1d8264")
++          : "#7affd7";
++        options.strokeWidth = FRAME_STYLE.strokeWidth;
++      }
+       return options;
+     }
+     case "line":
+@@ -768,21 +796,25 @@ const _generateElementShape = (
+   switch (element.type) {
+     case "rectangle":
+     case "iframe":
+-    case "embeddable": {
++    case "embeddable":
++    case "frame":
++    case "magicframe": {
+       let shape: ElementShapes[typeof element.type];
+       // this is for rendering the stroke/bg of the embeddable, especially
+       // when the src url is not set
+ 
+-      if (element.roundness) {
+-        const w = element.width;
+-        const h = element.height;
+-        const r = getCornerRadius(Math.min(w, h), element);
++      const cornerRadius = element.roundness
++        ? getCornerRadius(
++            Math.min(element.width, element.height),
++            element,
++          )
++        : isFrameLikeElement(element)
++        ? FRAME_STYLE.radius
++        : 0;
++
++      if (cornerRadius) {
+         shape = generator.path(
+-          `M ${r} 0 L ${w - r} 0 Q ${w} 0, ${w} ${r} L ${w} ${
+-            h - r
+-          } Q ${w} ${h}, ${w - r} ${h} L ${r} ${h} Q 0 ${h}, 0 ${
+-            h - r
+-          } L 0 ${r} Q 0 0, ${r} 0`,
++          getRoundedRectPath(element.width, element.height, cornerRadius),
+           generateRoughOptions(
+             modifyIframeLikeForRoughOptions(
+               element,
+@@ -979,8 +1011,6 @@ const _generateElementShape = (
+ 
+       return shapes;
+     }
+-    case "frame":
+-    case "magicframe":
+     case "text":
+     case "image": {
+       const shape: ElementShapes[typeof element.type] = null;
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+index 1d0ad58d8..e20930248 100644
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -13,7 +13,6 @@ import {
+   BOUND_TEXT_PADDING,
+   DEFAULT_REDUCED_GLOBAL_ALPHA,
+   ELEMENT_READY_TO_ERASE_OPACITY,
+-  FRAME_STYLE,
+   DARK_THEME_FILTER,
+   MIME_TYPES,
+   THEME,
+@@ -60,13 +59,12 @@ import {
+   isInitializedImageElement,
+   isArrowElement,
+   hasBoundTextElement,
+-  isMagicFrameElement,
+   isImageElement,
+ } from "./typeChecks";
+ import { getContainingFrame } from "./frame";
+ import { getCornerRadius } from "./utils";
+ 
+-import { ShapeCache } from "./shape";
++import { ShapeCache, filterDrawableSets } from "./shape";
+ 
+ import type {
+   ExcalidrawElement,
+@@ -803,36 +801,14 @@ export const renderElement = (
+           appState.scrollY,
+         );
+ 
+-        // TODO change later to only affect AI frames
+-        if (isMagicFrameElement(element)) {
+-          // Use special color for magic frames
+-          context.strokeStyle =
+-            appState.theme === THEME.LIGHT
+-              ? "#7affd7"
+-              : applyDarkModeFilter("#1d8264");
+-          context.lineWidth = FRAME_STYLE.strokeWidth / appState.zoom.value;
+-        } else {
+-          // Use element's own stroke properties
+-          context.strokeStyle = applyDarkModeFilter(
+-            element.strokeColor,
+-            appState.theme === THEME.DARK,
+-          );
+-          context.lineWidth = element.strokeWidth / appState.zoom.value;
+-        }
+-
+-        if (FRAME_STYLE.radius && context.roundRect) {
+-          context.beginPath();
+-          context.roundRect(
+-            0,
+-            0,
+-            element.width,
+-            element.height,
+-            FRAME_STYLE.radius / appState.zoom.value,
+-          );
+-          context.stroke();
+-          context.closePath();
+-        } else {
+-          context.strokeRect(0, 0, element.width, element.height);
++        const shape = ShapeCache.generateElementShape(element, renderConfig);
++        if (shape) {
++          context.lineJoin = "round";
++          context.lineCap = "round";
++          // Bind RoughCanvas to this context's canvas. App.rc is attached to
++          // the static canvas; during creation we paint on NewElementCanvas,
++          // and using App.rc would stamp the shape at the static canvas origin.
++          rough.canvas(context.canvas).draw(filterDrawableSets(shape, ["path"]));
+         }
+ 
+         context.restore();
+diff --git a/packages/excalidraw/scene/types.ts b/packages/excalidraw/scene/types.ts
+index c6f59a518..89bb3907a 100644
+--- a/packages/excalidraw/scene/types.ts
++++ b/packages/excalidraw/scene/types.ts
+@@ -177,6 +177,6 @@ export type ElementShapes = {
+   line: Drawable[];
+   text: null;
+   image: null;
+-  frame: null;
+-  magicframe: null;
++  frame: Drawable;
++  magicframe: Drawable;
+ };
+diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
+index ea9c60f87..71d9ecedc 100644
+--- a/packages/excalidraw/renderer/staticScene.ts
++++ b/packages/excalidraw/renderer/staticScene.ts
+@@ -21,7 +21,12 @@ import {
+   getAncestorFrames,
+ } from "@excalidraw/element";
+ 
+-import { renderElement, applyFrameCanvasTransform } from "@excalidraw/element";
++import {
++  renderElement,
++  applyFrameCanvasTransform,
++  ShapeCache,
++  filterDrawableSets,
++} from "@excalidraw/element";
+ 
+ import { getElementAbsoluteCoords } from "@excalidraw/element";
+ 
+@@ -45,6 +50,7 @@ import type {
+   StaticSceneRenderConfig,
+ } from "../scene/types";
+ import type { StaticCanvasAppState, Zoom } from "../types";
++import type { RoughCanvas } from "roughjs/bin/canvas";
+ 
+ const GridLineColor = {
+   [THEME.LIGHT]: {
+@@ -171,6 +177,8 @@ const renderFrameBackgrounds = (
+   visibleElements: readonly NonDeletedExcalidrawElement[],
+   elementsMap: ElementsMap,
+   appState: StaticCanvasAppState,
++  rc: RoughCanvas,
++  renderConfig: StaticCanvasRenderConfig,
+ ) => {
+   if (!appState.frameRendering.enabled) {
+     return;
+@@ -207,26 +215,14 @@ const renderFrameBackgrounds = (
+     // Apply element opacity
+     context.globalAlpha = element.opacity / 100;
+ 
+-    // Apply background color
+-    context.fillStyle = applyDarkModeFilter(
+-      element.backgroundColor,
+-      appState.theme === THEME.DARK,
+-    );
+-
+-    // Draw the background with rounded corners
+-    if (FRAME_STYLE.radius && context.roundRect) {
+-      context.beginPath();
+-      context.roundRect(
+-        0,
+-        0,
+-        element.width,
+-        element.height,
+-        FRAME_STYLE.radius / appState.zoom.value,
+-      );
+-      context.fill();
+-      context.closePath();
+-    } else {
+-      context.fillRect(0, 0, element.width, element.height);
++    const shape = ShapeCache.generateElementShape(element, {
++      isExporting: renderConfig.isExporting,
++      canvasBackgroundColor: renderConfig.canvasBackgroundColor,
++      embedsValidationStatus: renderConfig.embedsValidationStatus,
++      theme: appState.theme,
++    });
++    if (shape) {
++      rc.draw(filterDrawableSets(shape, ["fillPath", "fillSketch"]));
+     }
+ 
+     context.restore();
+@@ -383,7 +379,14 @@ const _renderStaticScene = ({
+ 
+   // Render frame backgrounds FIRST, before any children
+   // This ensures children appear on top of the frame background
+-  renderFrameBackgrounds(context, visibleElements, elementsMap, appState);
++  renderFrameBackgrounds(
++    context,
++    visibleElements,
++    elementsMap,
++    appState,
++    rc,
++    renderConfig,
++  );
+ 
+   // Paint visible elements
+   visibleElements
+diff --git a/packages/excalidraw/renderer/staticSvgScene.ts b/packages/excalidraw/renderer/staticSvgScene.ts
+index 5f6d36daa..878f8c9e3 100644
+--- a/packages/excalidraw/renderer/staticSvgScene.ts
++++ b/packages/excalidraw/renderer/staticSvgScene.ts
+@@ -1,5 +1,4 @@
+ import {
+-  FRAME_STYLE,
+   MAX_DECIMALS_FOR_SVG_EXPORT,
+   SVG_NS,
+   THEME,
+@@ -23,6 +22,7 @@ import { getBoundTextElement, getContainerElement } from "@excalidraw/element";
+ import { getLineHeightInPx } from "@excalidraw/element";
+ import {
+   isArrowElement,
++  isFrameLikeElement,
+   isIframeLikeElement,
+   isInitializedImageElement,
+   isTextElement,
+@@ -147,7 +147,15 @@ const renderElementToSvg = (
+     }
+     case "rectangle":
+     case "diamond":
+-    case "ellipse": {
++    case "ellipse":
++    case "frame":
++    case "magicframe": {
++      if (
++        isFrameLikeElement(element) &&
++        !renderConfig.frameRendering.enabled
++      ) {
++        break;
++      }
+       const shape = ShapeCache.generateElementShape(element, renderConfig);
+       const node = roughSVGDrawWithPrecision(
+         rsvg,
+@@ -604,42 +612,6 @@ const renderElementToSvg = (
+       }
+       break;
+     }
+-    // frames are not rendered and only acts as a container
+-    case "frame":
+-    case "magicframe": {
+-      if (
+-        renderConfig.frameRendering.enabled &&
+-        renderConfig.frameRendering.outline
+-      ) {
+-        const rect = document.createElementNS(SVG_NS, "rect");
+-
+-        rect.setAttribute(
+-          "transform",
+-          `translate(${offsetX || 0} ${
+-            offsetY || 0
+-          }) rotate(${degree} ${cx} ${cy})`,
+-        );
+-
+-        rect.setAttribute("width", `${element.width}px`);
+-        rect.setAttribute("height", `${element.height}px`);
+-        // Rounded corners
+-        rect.setAttribute("rx", FRAME_STYLE.radius.toString());
+-        rect.setAttribute("ry", FRAME_STYLE.radius.toString());
+-
+-        rect.setAttribute("fill", "none");
+-        rect.setAttribute(
+-          "stroke",
+-          applyDarkModeFilter(
+-            FRAME_STYLE.strokeColor,
+-            renderConfig.theme === THEME.DARK,
+-          ),
+-        );
+-        rect.setAttribute("stroke-width", FRAME_STYLE.strokeWidth.toString());
+-
+-        addToRoot(rect, element);
+-      }
+-      break;
+-    }
+     default: {
+       if (isTextElement(element)) {
+         const node = svgRoot.ownerDocument.createElementNS(SVG_NS, "g");

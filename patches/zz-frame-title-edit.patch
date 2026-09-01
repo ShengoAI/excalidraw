@@ -1,0 +1,136 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 3f0ac29ce..0d9abf988 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -764,6 +764,12 @@ class App extends React.Component<AppProps, AppState> {
+   /** current frame pointer cords */
+   lastPointerMoveCoords: { x: number; y: number } | null = null;
+   private lastCompletedCanvasClicks: { x: number; y: number }[] = [];
++  private lastFrameTitlePointerDown: {
++    frameId: string;
++    time: number;
++    x: number;
++    y: number;
++  } | null = null;
+   /** previous frame pointer coords */
+   previousPointerMoveCoords: { x: number; y: number } | null = null;
+ 
+@@ -2368,9 +2374,15 @@ class App extends React.Component<AppProps, AppState> {
+           onPointerDown={(event) => this.handleCanvasPointerDown(event)}
+           onWheel={(event) => this.handleWheel(event)}
+           onContextMenu={this.handleCanvasContextMenu}
+-          onDoubleClick={() => {
++          onDoubleClick={(event) => {
++            event.preventDefault();
++            event.stopPropagation();
+             this.setState({
+               editingFrame: f.id,
++              selectedElementIds: makeNextSelectedElementIds(
++                { [f.id]: true },
++                this.state,
++              ),
+             });
+           }}
+         >
+@@ -7570,6 +7582,35 @@ class App extends React.Component<AppProps, AppState> {
+     return null;
+   };
+ 
++  private beginFrameNameEditingOnSecondClick = (x: number, y: number) => {
++    const now = Date.now();
++    const prev = this.lastFrameTitlePointerDown;
++    const frameAtTitle = this.getFrameAtNameLabel(x, y);
++
++    if (
++      prev &&
++      now - prev.time < 400 &&
++      pointDistance(pointFrom(prev.x, prev.y), pointFrom(x, y)) <=
++        DOUBLE_TAP_POSITION_THRESHOLD / Math.max(this.state.zoom.value, 0.01)
++    ) {
++      this.lastFrameTitlePointerDown = null;
++      const frameId = frameAtTitle?.id ?? prev.frameId;
++      this.setState({
++        editingFrame: frameId,
++        selectedElementIds: makeNextSelectedElementIds(
++          { [frameId]: true },
++          this.state,
++        ),
++      });
++      return true;
++    }
++
++    this.lastFrameTitlePointerDown = frameAtTitle
++      ? { frameId: frameAtTitle.id, time: now, x, y }
++      : null;
++    return false;
++  };
++
+   private isPointInFrameNameLabel = (
+     frame: ExcalidrawFrameLikeElement,
+     x: number,
+@@ -8247,6 +8288,18 @@ class App extends React.Component<AppProps, AppState> {
+ 
+     this.cursor.reset();
+     if (!this.state.viewModeEnabled) {
++      const frameAtTitle = this.getFrameAtNameLabel(sceneX, sceneY);
++      if (frameAtTitle) {
++        this.setState({
++          editingFrame: frameAtTitle.id,
++          selectedElementIds: makeNextSelectedElementIds(
++            { [frameAtTitle.id]: true },
++            this.state,
++          ),
++        });
++        return;
++      }
++
+       const hitElement = this.getElementAtPosition(sceneX, sceneY);
+ 
+       if (isIframeLikeElement(hitElement)) {
+@@ -9512,6 +9565,17 @@ class App extends React.Component<AppProps, AppState> {
+       y: scenePointerY,
+     };
+ 
++    if (
++      this.isInteractionEnabled() &&
++      !this.state.viewModeEnabled &&
++      event.button === POINTER_BUTTON.MAIN &&
++      this.beginFrameNameEditingOnSecondClick(scenePointerX, scenePointerY)
++    ) {
++      event.preventDefault();
++      event.stopPropagation();
++      return;
++    }
++
+     const target = event.target as HTMLElement;
+     // capture subsequent pointer events to the canvas
+     // this makes other elements non-interactive until pointer up
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 1ffc4339a..27f1b3bc0 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -1410,4 +1410,24 @@ describe("selecting frames by interior click", () => {
+     expect(h.state.selectedElementIds[frame.id]).toBe(true);
+     expect(h.state.selectedElementIds[child.id]).toBeUndefined();
+   });
++
++  it("enters frame name editing on double-click of the title", () => {
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++      name: "My container",
++    });
++
++    API.setElements([frame]);
++    mouse.doubleClickAt(
++      FRAME_STYLE.nameInsetX + 20,
++      FRAME_STYLE.nameInsetY + 8,
++    );
++
++    expect(h.state.editingFrame).toBe(frame.id);
++  });
+ });

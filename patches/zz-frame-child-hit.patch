@@ -1,0 +1,223 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index a8303d45d..e0cb75d4b 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -7486,6 +7486,15 @@ class App extends React.Component<AppProps, AppState> {
+       preferSelected?: boolean;
+     },
+   ): NonDeleted<ExcalidrawElement> | null {
++    const includeLockedElements =
++      opts && "includeLockedElements" in opts
++        ? opts.includeLockedElements
++        : false;
++    const frameAtTitle = this.getFrameAtNameLabel(x, y, includeLockedElements);
++    if (frameAtTitle) {
++      return frameAtTitle;
++    }
++
+     let allHitElements: NonDeleted<ExcalidrawElement>[] = [];
+     if (opts && "allHitElements" in opts) {
+       allHitElements = opts?.allHitElements || [];
+@@ -7504,8 +7513,20 @@ class App extends React.Component<AppProps, AppState> {
+           }
+         }
+       }
+-      const elementWithHighestZIndex =
+-        allHitElements[allHitElements.length - 1];
++      // Frame interiors are hittable so empty clicks select the frame, but
++      // frames stay visually transparent. Prefer a child/shape hit so a frame
++      // in front cannot steal clicks from elements you can still see.
++      const nonFrameHits = allHitElements.filter(
++        (element) => !isFrameLikeElement(element),
++      );
++      const hitCandidates =
++        nonFrameHits.length > 0 ? nonFrameHits : allHitElements;
++
++      if (hitCandidates.length === 1) {
++        return hitCandidates[0];
++      }
++
++      const elementWithHighestZIndex = hitCandidates[hitCandidates.length - 1];
+ 
+       // If we're hitting element with highest z-index only on its bounding box
+       // while also hitting other element figure, the latter should be considered.
+@@ -7521,7 +7542,7 @@ class App extends React.Component<AppProps, AppState> {
+           : null,
+       })
+         ? elementWithHighestZIndex
+-        : allHitElements[allHitElements.length - 2];
++        : hitCandidates[hitCandidates.length - 2];
+     }
+     if (allHitElements.length === 1) {
+       return allHitElements[0];
+@@ -7530,6 +7551,65 @@ class App extends React.Component<AppProps, AppState> {
+     return null;
+   }
+ 
++  /** Title chrome sits inside the frame; clicks there select the frame. */
++  private getFrameAtNameLabel = (
++    x: number,
++    y: number,
++    includeLockedElements?: boolean,
++  ): NonDeleted<ExcalidrawFrameLikeElement> | null => {
++    const frames = this.scene.getNonDeletedFramesLikes();
++    for (let index = frames.length - 1; index >= 0; index--) {
++      const frame = frames[index];
++      if (frame.locked && !includeLockedElements) {
++        continue;
++      }
++      if (this.isPointInFrameNameLabel(frame, x, y)) {
++        return frame;
++      }
++    }
++    return null;
++  };
++
++  private isPointInFrameNameLabel = (
++    frame: ExcalidrawFrameLikeElement,
++    x: number,
++    y: number,
++  ) => {
++    const { topLeftWidth, topRightWidth, titleGap } =
++      this.getFrameNameChromeOffset(frame);
++    const width = Math.max(
++      0,
++      frame.width -
++        FRAME_STYLE.nameInsetX * 2 -
++        topLeftWidth -
++        titleGap -
++        topRightWidth,
++    );
++    const height = Math.max(
++      SHAPE_TOP_CONTENT_MIN_HEIGHT,
++      FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight,
++    );
++    const localLeft = FRAME_STYLE.nameInsetX + topLeftWidth + titleGap;
++    const localTop = FRAME_STYLE.nameInsetY;
++    const center = pointFrom(
++      frame.x + frame.width / 2,
++      frame.y + frame.height / 2,
++    );
++    const [localX, localY] = pointRotateRads(
++      pointFrom(x, y),
++      center,
++      -frame.angle as Radians,
++    );
++    const px = localX - frame.x;
++    const py = localY - frame.y;
++    return (
++      px >= localLeft &&
++      py >= localTop &&
++      px <= localLeft + width &&
++      py <= localTop + height
++    );
++  };
++
+   // NOTE: Hot path for hit testing, so avoid unnecessary computations
+   private getElementsAtPosition(
+     x: number,
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index f7466baa6..1ffc4339a 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -2,7 +2,7 @@ import {
+   convertToExcalidrawElements,
+   Excalidraw,
+ } from "@excalidraw/excalidraw";
+-import { arrayToMap } from "@excalidraw/common";
++import { arrayToMap, FRAME_STYLE } from "@excalidraw/common";
+ 
+ import { API } from "@excalidraw/excalidraw/tests/helpers/api";
+ import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
+@@ -1323,4 +1323,91 @@ describe("selecting frames by interior click", () => {
+     expect(h.state.selectedElementIds[child.id]).toBe(true);
+     expect(h.state.selectedElementIds[frame.id]).toBeUndefined();
+   });
++
++  it("selects a filled child even when the frame is in front", () => {
++    const child = API.createElement({
++      id: "child",
++      type: "rectangle",
++      x: 40,
++      y: 40,
++      width: 40,
++      height: 40,
++      backgroundColor: "#ffc9c9",
++      fillStyle: "solid",
++      frameId: "frame",
++    });
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++
++    // Frame last → higher z-index, visually on top but transparent.
++    API.setElements([child, frame]);
++    mouse.clickAt(60, 60);
++
++    expect(h.state.selectedElementIds[child.id]).toBe(true);
++    expect(h.state.selectedElementIds[frame.id]).toBeUndefined();
++  });
++
++  it("selects an unfilled child when clicking its stroke over a frame", () => {
++    const child = API.createElement({
++      id: "child",
++      type: "rectangle",
++      x: 40,
++      y: 40,
++      width: 40,
++      height: 40,
++      backgroundColor: "transparent",
++      frameId: "frame",
++    });
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++
++    API.setElements([child, frame]);
++    mouse.clickAt(40, 60);
++
++    expect(h.state.selectedElementIds[child.id]).toBe(true);
++    expect(h.state.selectedElementIds[frame.id]).toBeUndefined();
++  });
++
++  it("selects the frame when clicking its title even if a child overlaps the title", () => {
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const child = API.createElement({
++      id: "child",
++      type: "rectangle",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 40,
++      backgroundColor: "#ffc9c9",
++      fillStyle: "solid",
++      frameId: frame.id,
++    });
++
++    API.setElements([frame, child]);
++    mouse.clickAt(
++      FRAME_STYLE.nameInsetX + 20,
++      FRAME_STYLE.nameInsetY + 8,
++    );
++
++    expect(h.state.selectedElementIds[frame.id]).toBe(true);
++    expect(h.state.selectedElementIds[child.id]).toBeUndefined();
++  });
+ });

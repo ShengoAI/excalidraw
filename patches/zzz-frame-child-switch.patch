@@ -1,0 +1,113 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 0d9abf988..e7a972193 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -10715,10 +10715,10 @@ class App extends React.Component<AppProps, AppState> {
+         pointerDownState.hit.allHitElements = unlockedHitElements;
+ 
+         const hitElement = pointerDownState.hit.element;
+-        const someHitElementIsSelected =
+-          pointerDownState.hit.allHitElements.some((element) =>
+-            this.isASelectedElement(element),
+-          );
++        const someHitElementIsSelected = this.isClickingAlreadySelected(
++          hitElement,
++          pointerDownState.hit.allHitElements,
++        );
+         if (
+           (hitElement === null || !someHitElementIsSelected) &&
+           !event.shiftKey &&
+@@ -10831,10 +10831,11 @@ class App extends React.Component<AppProps, AppState> {
+                     delete nextSelectedElementIds[element.id];
+                   });
+                 } else if (hitElement.frameId) {
+-                  // if hitElement is in a frame and its frame has been selected
+-                  // disable selection for the given element
++                  // Switch from the selected frame to the child. Keeping both
++                  // violates "frame and members are not selected together";
++                  // dropping the child made the first click a no-op.
+                   if (nextSelectedElementIds[hitElement.frameId]) {
+-                    delete nextSelectedElementIds[hitElement.id];
++                    nextSelectedElementIds = { [hitElement.id]: true };
+                   }
+                 } else {
+                   // hitElement is neither a frame nor an element in a frame
+@@ -10930,6 +10931,27 @@ class App extends React.Component<AppProps, AppState> {
+     return hitElement != null && this.state.selectedElementIds[hitElement.id];
+   }
+ 
++  /** Selected frames still hit-test on their interior, so a child click would
++   *  look like "clicked the current selection" and get ignored. */
++  private isClickingAlreadySelected(
++    hitElement: ExcalidrawElement | null,
++    allHitElements: readonly ExcalidrawElement[],
++  ) {
++    return allHitElements.some((element) => {
++      if (!this.isASelectedElement(element)) {
++        return false;
++      }
++      if (
++        isFrameLikeElement(element) &&
++        hitElement &&
++        hitElement.id !== element.id
++      ) {
++        return false;
++      }
++      return true;
++    });
++  }
++
+   private isHittingCommonBoundingBoxOfSelectedElements(
+     point: Readonly<{ x: number; y: number }>,
+     selectedElements: readonly ExcalidrawElement[],
+@@ -12002,8 +12024,9 @@ class App extends React.Component<AppProps, AppState> {
+         }
+       }
+ 
+-      const hasHitASelectedElement = pointerDownState.hit.allHitElements.some(
+-        (element) => this.isASelectedElement(element),
++      const hasHitASelectedElement = this.isClickingAlreadySelected(
++        pointerDownState.hit.element,
++        pointerDownState.hit.allHitElements,
+       );
+ 
+       const isSelectingPointsInLineEditor =
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 27f1b3bc0..76a677160 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -1430,4 +1430,34 @@ describe("selecting frames by interior click", () => {
+ 
+     expect(h.state.editingFrame).toBe(frame.id);
+   });
++
++  it("selects a child on the first click after the frame was selected", () => {
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const child = API.createElement({
++      id: "child",
++      type: "rectangle",
++      x: 60,
++      y: 80,
++      width: 40,
++      height: 40,
++      backgroundColor: "#ffc9c9",
++      fillStyle: "solid",
++      frameId: frame.id,
++    });
++
++    API.setElements([frame, child]);
++    mouse.clickAt(20, 20);
++    expect(h.state.selectedElementIds[frame.id]).toBe(true);
++
++    mouse.clickAt(80, 100);
++    expect(h.state.selectedElementIds[child.id]).toBe(true);
++    expect(h.state.selectedElementIds[frame.id]).toBeUndefined();
++  });
+ });

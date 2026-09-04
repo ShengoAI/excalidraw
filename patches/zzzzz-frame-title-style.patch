@@ -1,0 +1,308 @@
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -219,6 +219,8 @@
+   autoLayoutAlign: FrameAutoLayoutAlign;
+   /** In-frame title font size. Defaults to FRAME_STYLE.nameFontSize. */
+   fontSize: number;
++  /** In-frame title font family. Defaults to Assistant. */
++  fontFamily: FontFamilyValues;
+   /** In-frame title color. Null uses the theme default name color. */
+   nameColor: string | null;
+   /** In-frame title horizontal alignment. Defaults to left. */
+@@ -245,6 +247,7 @@
+   };
+   autoLayoutAlign: FrameAutoLayoutAlign;
+   fontSize: number;
++  fontFamily: FontFamilyValues;
+   nameColor: string | null;
+   textAlign: TextAlign;
+   collapsed: boolean;
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1,5 +1,6 @@
+ import {
+   arrayToMap,
++  FONT_FAMILY,
+   FRAME_STYLE,
+   FRAME_TITLE_BLOCK_HEIGHT,
+   SHAPE_FOOTER_RESERVED_HEIGHT,
+@@ -167,6 +168,10 @@
+   frame?: Pick<ExcalidrawFrameLikeElement, "fontSize"> | null,
+ ) => frame?.fontSize ?? FRAME_STYLE.nameFontSize;
+ 
++export const getFrameNameFontFamily = (
++  frame?: Pick<ExcalidrawFrameLikeElement, "fontFamily"> | null,
++) => frame?.fontFamily ?? FONT_FAMILY.Assistant;
++
+ export const getFrameNameTextAlign = (
+   frame?: Pick<ExcalidrawFrameLikeElement, "textAlign"> | null,
+ ): TextAlign =>
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -6,6 +6,7 @@
+   DEFAULT_VERTICAL_ALIGN,
+   DEFAULT_STROKE_STREAMLINE,
+   FRAME_STYLE,
++  FONT_FAMILY,
+   VERTICAL_ALIGN,
+   randomInteger,
+   randomId,
+@@ -219,6 +220,7 @@
+     autoLayoutHug?: { horizontal: boolean; vertical: boolean };
+     autoLayoutAlign?: FrameAutoLayoutAlign;
+     fontSize?: number;
++    fontFamily?: FontFamilyValues;
+     nameColor?: string | null;
+     textAlign?: TextAlign;
+     collapsed?: boolean;
+@@ -243,6 +245,7 @@
+       },
+       autoLayoutAlign: opts?.autoLayoutAlign ?? "top-left",
+       fontSize: opts?.fontSize ?? FRAME_STYLE.nameFontSize,
++      fontFamily: opts?.fontFamily ?? FONT_FAMILY.Assistant,
+       nameColor: opts?.nameColor ?? null,
+       textAlign: opts?.textAlign ?? "left",
+       collapsed: opts?.collapsed ?? false,
+@@ -264,6 +267,7 @@
+     autoLayoutHug?: { horizontal: boolean; vertical: boolean };
+     autoLayoutAlign?: FrameAutoLayoutAlign;
+     fontSize?: number;
++    fontFamily?: FontFamilyValues;
+     nameColor?: string | null;
+     textAlign?: TextAlign;
+     collapsed?: boolean;
+@@ -288,6 +292,7 @@
+       },
+       autoLayoutAlign: opts?.autoLayoutAlign ?? "top-left",
+       fontSize: opts?.fontSize ?? FRAME_STYLE.nameFontSize,
++      fontFamily: opts?.fontFamily ?? FONT_FAMILY.Assistant,
+       nameColor: opts?.nameColor ?? null,
+       textAlign: opts?.textAlign ?? "left",
+       collapsed: opts?.collapsed ?? false,
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -767,6 +767,11 @@
+         },
+         autoLayoutAlign: element.autoLayoutAlign ?? "top-left",
+         fontSize: element.fontSize ?? FRAME_STYLE.nameFontSize,
++        fontFamily:
++          typeof element.fontFamily === "number" &&
++          (Object.values(FONT_FAMILY) as number[]).includes(element.fontFamily)
++            ? element.fontFamily
++            : FONT_FAMILY.Assistant,
+         nameColor: element.nameColor ?? null,
+         textAlign:
+           element.textAlign === "center" || element.textAlign === "right"
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -70,6 +70,7 @@
+   debounce,
+   distance,
+   getFontString,
++  getFontFamilyString,
+   getNearestScrollableContainer,
+   isInputLike,
+   isToolIcon,
+@@ -276,6 +277,7 @@
+   inferFrameAutoLayoutDirection,
+   getFrameNameColor,
+   getFrameNameFontSize,
++  getFrameNameFontFamily,
+   getFrameNameTextAlign,
+   getCollapsedFrameHeight,
+   getAutoLayoutDropIndicator,
+@@ -2294,7 +2296,7 @@
+               padding: 0,
+               margin: 0,
+               resize: "none",
+-              fontFamily: "Assistant",
++              fontFamily: "inherit",
+               fontSize: "inherit",
+               lineHeight: "inherit",
+               color: "inherit",
+@@ -2335,6 +2337,9 @@
+                 : "flex-start",
+             minHeight: `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`,
+             height: "auto",
++            fontFamily: getFontFamilyString({
++              fontFamily: getFrameNameFontFamily(f),
++            }),
+             fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
+             color: getFrameNameColor(f, isDarkTheme),
+             lineHeight: FRAME_STYLE.nameLineHeight,
+@@ -2400,18 +2405,12 @@
+     return { topLeftWidth, topRightWidth, titleGap };
+   };
+ 
+-  /** Center the in-frame title only when both top chrome slots are present. */
++  /** Honor the frame's stored title alignment (left / center / right). */
+   private getFrameNameEffectiveTextAlign = (
+     frame: ExcalidrawFrameLikeElement,
+-    topLeftWidth: number,
+-    topRightWidth: number,
+-  ) => {
+-    const requested = getFrameNameTextAlign(frame);
+-    if (requested === "center" && !(topLeftWidth > 0 && topRightWidth > 0)) {
+-      return "left";
+-    }
+-    return requested;
+-  };
++    _topLeftWidth: number,
++    _topRightWidth: number,
++  ) => getFrameNameTextAlign(frame);
+ 
+   private getFrameNameViewportOrigin = (
+     frame: ExcalidrawFrameLikeElement,
+@@ -2489,6 +2488,9 @@
+     titleEl.style.textAlign = nameAlign;
+     titleEl.style.minHeight = `${SHAPE_TOP_CONTENT_MIN_HEIGHT * this.state.zoom.value}px`;
+     titleEl.style.height = "auto";
++    titleEl.style.fontFamily = getFontFamilyString({
++      fontFamily: getFrameNameFontFamily(element),
++    });
+     titleEl.style.overflow = "visible";
+     titleEl.style.whiteSpace = "pre-wrap";
+     titleEl.style.overflowWrap = "anywhere";
+diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
+--- a/packages/excalidraw/components/SearchMenu.tsx
++++ b/packages/excalidraw/components/SearchMenu.tsx
+@@ -5,7 +5,6 @@
+ import {
+   CLASSES,
+   EVENT,
+-  FONT_FAMILY,
+   FRAME_STYLE,
+   getLineHeight,
+ } from "@excalidraw/common";
+@@ -30,6 +29,7 @@
+ import {
+   getDefaultFrameName,
+   getFrameNameFontSize,
++  getFrameNameFontFamily,
+ } from "@excalidraw/element/frame";
+ 
+ import type {
+@@ -211,7 +211,7 @@
+             ? getFrameNameFontSize(match.element)
+             : match.element.fontSize,
+           fontFamily: isFrameLikeElement(match.element)
+-            ? FONT_FAMILY.Assistant
++            ? getFrameNameFontFamily(match.element)
+             : match.element.fontFamily,
+         });
+ 
+@@ -746,12 +746,13 @@
+   const matchedText = text.slice(index, index + searchQuery.length);
+ 
+   const prefixText = text.slice(0, index);
++  const fontFamily = getFrameNameFontFamily(frame);
+   const font = getFontString({
+     fontSize: getFrameNameFontSize(frame),
+-    fontFamily: FONT_FAMILY.Assistant,
++    fontFamily,
+   });
+ 
+-  const lineHeight = getLineHeight(FONT_FAMILY.Assistant);
++  const lineHeight = getLineHeight(fontFamily);
+ 
+   const offset = measureText(prefixText, font, lineHeight);
+ 
+diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
+--- a/packages/excalidraw/scene/export.ts
++++ b/packages/excalidraw/scene/export.ts
+@@ -3,7 +3,6 @@
+ import {
+   DEFAULT_EXPORT_PADDING,
+   FRAME_STYLE,
+-  FONT_FAMILY,
+   SVG_NS,
+   THEME,
+   MIME_TYPES,
+@@ -32,6 +31,7 @@
+   getFrameLikeTitle,
+   getFrameNameColor,
+   getFrameNameFontSize,
++  getFrameNameFontFamily,
+   getFrameNameTextAlign,
+   getRootElements,
+ } from "@excalidraw/element";
+@@ -118,7 +118,7 @@
+         newTextElement({
+           x: element.x + FRAME_STYLE.nameInsetX,
+           y: element.y + FRAME_STYLE.nameInsetY,
+-          fontFamily: FONT_FAMILY.Helvetica,
++          fontFamily: getFrameNameFontFamily(element),
+           fontSize: getFrameNameFontSize(element),
+           lineHeight:
+             FRAME_STYLE.nameLineHeight as ExcalidrawTextElement["lineHeight"],
+diff --git a/packages/excalidraw/actions/actionProperties.tsx b/packages/excalidraw/actions/actionProperties.tsx
+--- a/packages/excalidraw/actions/actionProperties.tsx
++++ b/packages/excalidraw/actions/actionProperties.tsx
+@@ -1229,6 +1229,15 @@
+           elements,
+           appState,
+           (oldElement) => {
++            if (isFrameLikeElement(oldElement)) {
++              if (oldElement.fontFamily !== nextFontFamily || currentItemFontFamily) {
++                return newElementWith(oldElement, {
++                  fontFamily: nextFontFamily,
++                });
++              }
++              return oldElement;
++            }
++
+             if (
+               isTextElement(oldElement) &&
+               (oldElement.fontFamily !== nextFontFamily ||
+@@ -1331,6 +1340,9 @@
+             if (isTextElement(element)) {
+               return element.fontFamily;
+             }
++            if (isFrameLikeElement(element)) {
++              return element.fontFamily;
++            }
+             const boundTextElement = getBoundTextElement(element, elementsMap);
+             if (boundTextElement) {
+               return boundTextElement.fontFamily;
+@@ -1339,6 +1351,7 @@
+           },
+           (element) =>
+             isTextElement(element) ||
++            isFrameLikeElement(element) ||
+             getBoundTextElement(element, elementsMap) !== null,
+           (hasSelection) =>
+             hasSelection
+@@ -1516,6 +1529,10 @@
+               app.scene,
+             );
+             return newElement;
++          }
++
++          if (isFrameLikeElement(oldElement)) {
++            return newElementWith(oldElement, { textAlign: value });
+           }
+ 
+           return oldElement;
+@@ -1564,6 +1581,9 @@
+               app,
+               (element) => {
+                 if (isTextElement(element)) {
++                  return element.textAlign;
++                }
++                if (isFrameLikeElement(element)) {
+                   return element.textAlign;
+                 }
+                 const boundTextElement = getBoundTextElement(
+@@ -1577,6 +1597,7 @@
+               },
+               (element) =>
+                 isTextElement(element) ||
++                isFrameLikeElement(element) ||
+                 getBoundTextElement(element, elementsMap) !== null,
+               (hasSelection) =>
+                 hasSelection ? null : appState.currentItemTextAlign,

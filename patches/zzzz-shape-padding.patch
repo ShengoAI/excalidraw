@@ -1,0 +1,297 @@
+diff --git a/packages/element/src/types.ts b/packages/element/src/types.ts
+--- a/packages/element/src/types.ts
++++ b/packages/element/src/types.ts
+@@ -62,6 +62,14 @@
+   minWidth?: number;
+   /** Optional lower height bound enforced by interactive resizing. */
+   minHeight?: number;
++  /**
++   * Bound-text insets for rectangle, diamond, and ellipse.
++   * Defaults to BOUND_TEXT_PADDING (5) on each axis when omitted.
++   */
++  padding?: {
++    horizontal: number;
++    vertical: number;
++  };
+   angle: Radians;
+   /** Random integer used to seed shape generation so that the roughjs shape
+       doesn't differ across renders. */
+diff --git a/packages/element/src/newElement.ts b/packages/element/src/newElement.ts
+--- a/packages/element/src/newElement.ts
++++ b/packages/element/src/newElement.ts
+@@ -97,6 +97,7 @@
+     height = 0,
+     minWidth,
+     minHeight,
++    padding,
+     angle = 0 as Radians,
+     groupIds = [],
+     frameId = null,
+@@ -144,6 +145,18 @@
+     height,
+     ...(Number.isFinite(minWidth) && minWidth! >= 0 ? { minWidth } : {}),
+     ...(Number.isFinite(minHeight) && minHeight! >= 0 ? { minHeight } : {}),
++    ...(padding &&
++    Number.isFinite(padding.horizontal) &&
++    padding.horizontal >= 0 &&
++    Number.isFinite(padding.vertical) &&
++    padding.vertical >= 0
++      ? {
++          padding: {
++            horizontal: padding.horizontal,
++            vertical: padding.vertical,
++          },
++        }
++      : {}),
+     angle,
+     strokeColor,
+     backgroundColor,
+diff --git a/packages/excalidraw/data/restore.ts b/packages/excalidraw/data/restore.ts
+--- a/packages/excalidraw/data/restore.ts
++++ b/packages/excalidraw/data/restore.ts
+@@ -417,7 +417,7 @@
+   T extends Required<
+     Omit<
+       ExcalidrawElement,
+-      "customData" | "shadow" | "minWidth" | "minHeight" | "hidden"
++      "customData" | "shadow" | "minWidth" | "minHeight" | "hidden" | "padding"
+     >
+   > & {
+     customData?: ExcalidrawElement["customData"];
+@@ -425,6 +425,7 @@
+     minWidth?: ExcalidrawElement["minWidth"];
+     minHeight?: ExcalidrawElement["minHeight"];
+     hidden?: ExcalidrawElement["hidden"];
++    padding?: ExcalidrawElement["padding"];
+     /** @deprecated */
+     boundElementIds?: readonly ExcalidrawElement["id"][];
+     /** @deprecated */
+@@ -473,6 +474,17 @@
+     minHeight:
+       Number.isFinite(element.minHeight) && element.minHeight! >= 0
+         ? element.minHeight
++        : undefined,
++    padding:
++      element.padding &&
++      Number.isFinite(element.padding.horizontal) &&
++      element.padding.horizontal >= 0 &&
++      Number.isFinite(element.padding.vertical) &&
++      element.padding.vertical >= 0
++        ? {
++            horizontal: element.padding.horizontal,
++            vertical: element.padding.vertical,
++          }
+         : undefined,
+     seed: element.seed ?? 1,
+     groupIds: element.groupIds ?? [],
+diff --git a/packages/element/src/textElement.ts b/packages/element/src/textElement.ts
+--- a/packages/element/src/textElement.ts
++++ b/packages/element/src/textElement.ts
+@@ -108,6 +108,7 @@
+       const nextHeight = computeContainerDimensionForBoundText(
+         metrics.height,
+         container.type,
++        getBoundTextPadding(container).vertical * 2,
+       );
+       scene.mutateElement(container, { height: nextHeight });
+       updateOriginalContainerCache(container.id, nextHeight);
+@@ -117,6 +118,7 @@
+       const nextWidth = computeContainerDimensionForBoundText(
+         metrics.width,
+         container.type,
++        getBoundTextPadding(container).horizontal * 2,
+       );
+       scene.mutateElement(container, { width: nextWidth });
+     }
+@@ -188,6 +190,7 @@
+       containerHeight = computeContainerDimensionForBoundText(
+         nextHeight,
+         container.type,
++        getBoundTextPadding(container).vertical * 2,
+       );
+ 
+       const diff = containerHeight - container.height;
+@@ -354,9 +357,29 @@
+   return { x: center[0], y: center[1] };
+ };
+ 
++const normalizePaddingValue = (value: unknown, fallback: number) =>
++  Number.isFinite(value) && (value as number) >= 0
++    ? (value as number)
++    : fallback;
++
++/** Bound-text insets; defaults to BOUND_TEXT_PADDING when `padding` is unset. */
++export const getBoundTextPadding = (
++  container?: Pick<ExcalidrawElement, "padding"> | null,
++) => ({
++  horizontal: normalizePaddingValue(
++    container?.padding?.horizontal,
++    BOUND_TEXT_PADDING,
++  ),
++  vertical: normalizePaddingValue(
++    container?.padding?.vertical,
++    BOUND_TEXT_PADDING,
++  ),
++});
++
+ export const getContainerCoords = (container: ExcalidrawElement) => {
+-  let offsetX = BOUND_TEXT_PADDING;
+-  let offsetY = BOUND_TEXT_PADDING;
++  const padding = getBoundTextPadding(container);
++  let offsetX = padding.horizontal;
++  let offsetY = padding.vertical;
+ 
+   if (container.type === "ellipse") {
+     // The derivation of coordinates is explained in https://github.com/excalidraw/excalidraw/pull/6172
+@@ -449,9 +472,9 @@
+ export const computeContainerDimensionForBoundText = (
+   dimension: number,
+   containerType: ExtractSetType<typeof VALID_CONTAINER_TYPES>,
++  padding: number = BOUND_TEXT_PADDING * 2,
+ ) => {
+   dimension = Math.ceil(dimension);
+-  const padding = BOUND_TEXT_PADDING * 2;
+ 
+   if (containerType === "ellipse") {
+     return Math.round(((dimension + padding) / Math.sqrt(2)) * 2);
+@@ -470,6 +493,7 @@
+   boundTextElement: ExcalidrawTextElement | null,
+ ) => {
+   const { width } = container;
++  const padX = getBoundTextPadding(container).horizontal * 2;
+   if (isArrowElement(container)) {
+     const minWidth =
+       (boundTextElement?.fontSize ?? DEFAULT_FONT_SIZE) *
+@@ -480,14 +504,14 @@
+     // The width of the largest rectangle inscribed inside an ellipse is
+     // Math.round((ellipse.width / 2) * Math.sqrt(2)) which is derived from
+     // equation of an ellipse -https://github.com/excalidraw/excalidraw/pull/6172
+-    return Math.round((width / 2) * Math.sqrt(2)) - BOUND_TEXT_PADDING * 2;
++    return Math.round((width / 2) * Math.sqrt(2)) - padX;
+   }
+   if (container.type === "diamond") {
+     // The width of the largest rectangle inscribed inside a rhombus is
+     // Math.round(width / 2) - https://github.com/excalidraw/excalidraw/pull/6265
+-    return Math.round(width / 2) - BOUND_TEXT_PADDING * 2;
++    return Math.round(width / 2) - padX;
+   }
+-  return width - BOUND_TEXT_PADDING * 2;
++  return width - padX;
+ };
+ 
+ export const getBoundTextMaxHeight = (
+@@ -495,6 +519,7 @@
+   boundTextElement: ExcalidrawTextElementWithContainer,
+ ) => {
+   const { height } = container;
++  const padY = getBoundTextPadding(container).vertical * 2;
+   if (isArrowElement(container)) {
+     const containerHeight = height - BOUND_TEXT_PADDING * 8 * 2;
+     if (containerHeight <= 0) {
+@@ -506,14 +531,14 @@
+     // The height of the largest rectangle inscribed inside an ellipse is
+     // Math.round((ellipse.height / 2) * Math.sqrt(2)) which is derived from
+     // equation of an ellipse - https://github.com/excalidraw/excalidraw/pull/6172
+-    return Math.round((height / 2) * Math.sqrt(2)) - BOUND_TEXT_PADDING * 2;
++    return Math.round((height / 2) * Math.sqrt(2)) - padY;
+   }
+   if (container.type === "diamond") {
+     // The height of the largest rectangle inscribed inside a rhombus is
+     // Math.round(height / 2) - https://github.com/excalidraw/excalidraw/pull/6265
+-    return Math.round(height / 2) - BOUND_TEXT_PADDING * 2;
++    return Math.round(height / 2) - padY;
+   }
+-  return height - BOUND_TEXT_PADDING * 2;
++  return height - padY;
+ };
+ 
+ /** retrieves text from text elements and concatenates to a single string */
+diff --git a/packages/excalidraw/wysiwyg/textWysiwyg.tsx b/packages/excalidraw/wysiwyg/textWysiwyg.tsx
+--- a/packages/excalidraw/wysiwyg/textWysiwyg.tsx
++++ b/packages/excalidraw/wysiwyg/textWysiwyg.tsx
+@@ -33,6 +33,7 @@
+   computeContainerDimensionForBoundText,
+   computeBoundTextPosition,
+   getBoundTextElement,
++  getBoundTextPadding,
+ } from "@excalidraw/element";
+ import { getTextWidth } from "@excalidraw/element";
+ import { getLineHeightInPx } from "@excalidraw/element";
+@@ -337,6 +338,7 @@
+           const targetContainerHeight = computeContainerDimensionForBoundText(
+             height,
+             container.type,
++            getBoundTextPadding(container).vertical * 2,
+           );
+ 
+           app.scene.mutateElement(container, { height: targetContainerHeight });
+@@ -352,6 +354,7 @@
+           const targetContainerHeight = computeContainerDimensionForBoundText(
+             height,
+             container.type,
++            getBoundTextPadding(container).vertical * 2,
+           );
+           app.scene.mutateElement(container, { height: targetContainerHeight });
+           updateBoundElements(container, app.scene);
+diff --git a/packages/element/tests/textElement.test.ts b/packages/element/tests/textElement.test.ts
+--- a/packages/element/tests/textElement.test.ts
++++ b/packages/element/tests/textElement.test.ts
+@@ -50,6 +50,31 @@
+         y: 50,
+       });
+     });
++
++    it("should apply custom padding on rectangle, ellipse, and diamond", () => {
++      const padding = { horizontal: 20, vertical: 10 };
++      expect(
++        getContainerCoords({
++          ...API.createElement({ type: "rectangle", ...params }),
++          padding,
++        }),
++      ).toEqual({ x: 30, y: 30 });
++      expect(
++        getContainerCoords({
++          ...API.createElement({ type: "ellipse", ...params }),
++          padding,
++        }),
++      ).toEqual({
++        x: 59.289321881345245,
++        y: 44.64466094067262,
++      });
++      expect(
++        getContainerCoords({
++          ...API.createElement({ type: "diamond", ...params }),
++          padding,
++        }),
++      ).toEqual({ x: 80, y: 55 });
++    });
+   });
+ 
+   describe("Test computeContainerDimensionForBoundText", () => {
+@@ -108,6 +133,26 @@
+     it("should return max width when container is diamond", () => {
+       const container = API.createElement({ type: "diamond", ...params });
+       expect(getBoundTextMaxWidth(container, null)).toBe(79);
++    });
++
++    it("should honor custom padding on rectangle, ellipse, and diamond", () => {
++      const padding = { horizontal: 20, vertical: 10 };
++      const rectangle = {
++        ...API.createElement({ type: "rectangle", ...params }),
++        padding,
++      };
++      const ellipse = {
++        ...API.createElement({ type: "ellipse", ...params }),
++        padding,
++      };
++      const diamond = {
++        ...API.createElement({ type: "diamond", ...params }),
++        padding,
++      };
++
++      expect(getBoundTextMaxWidth(rectangle, null)).toBe(138);
++      expect(getBoundTextMaxWidth(ellipse, null)).toBe(86);
++      expect(getBoundTextMaxWidth(diamond, null)).toBe(49);
+     });
+   });
+ 

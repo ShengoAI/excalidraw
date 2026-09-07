@@ -59,6 +59,8 @@ Applied in filename order:
 | `z-min-element-size.patch` | Optional `minWidth` / `minHeight` enforced during interactive resize. |
 | `zzzz-shape-padding.patch` | Optional `padding` on rectangle, diamond, and ellipse for bound-text insets. |
 | `zzzzz-frame-title-style.patch` | Frame title uses stored `textAlign` and `fontFamily`. |
+| `zzzzzz-frame-stacking.patch` | Later frames cover earlier frames; children stack with their frame. |
+| `zzzzzzz-frame-overlap-nest.patch` | Nested frames join a parent on overlap, same as shapes. |
 
 Patches that touch the same files (e.g. `types.ts`, `newElement.ts`, `App.tsx`, `restore.ts`) are ordered so later patches apply on top of earlier ones. If you add a patch that overlaps, pick a filename that sorts into the right sequence, or adjust existing patches so they still apply in alphabetical order.
 

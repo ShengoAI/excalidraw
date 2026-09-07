@@ -1,0 +1,280 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -369,6 +369,20 @@
+   frame: ExcalidrawFrameLikeElement,
+   elementsMap: ElementsMap,
+ ) => {
++  if (element.id === frame.id) {
++    return false;
++  }
++  // Inclusive AABB so a first edge-touch counts, matching shape drops.
++  const [minX1, minY1, maxX1, maxY1] = getElementBounds(element, elementsMap);
++  const [minX2, minY2, maxX2, maxY2] = getElementBounds(frame, elementsMap);
++  if (
++    minX1 <= maxX2 &&
++    maxX1 >= minX2 &&
++    minY1 <= maxY2 &&
++    maxY1 >= minY2
++  ) {
++    return true;
++  }
+   return (
+     elementsAreInFrameBounds([element], frame, elementsMap) ||
+     isElementIntersectingFrame(element, frame, elementsMap) ||
+@@ -469,6 +483,29 @@
+     }
+   }
+   return frameChildren;
++};
++
++/** Direct children plus nested descendants of a frame. */
++export const getFrameDescendants = (
++  allElements: ElementsMapOrArray,
++  frameId: string,
++) => {
++  const descendants: ExcalidrawElement[] = [];
++  const pending = [frameId];
++  const seen = new Set<string>([frameId]);
++  while (pending.length) {
++    const currentId = pending.pop()!;
++    for (const element of allElements.values()) {
++      if (element.frameId === currentId && !seen.has(element.id)) {
++        seen.add(element.id);
++        descendants.push(element);
++        if (isFrameLikeElement(element)) {
++          pending.push(element.id);
++        }
++      }
++    }
++  }
++  return descendants;
+ };
+ 
+ export const getFrameLikeElements = (
+@@ -1283,9 +1320,7 @@
+         const groupElements = getElementsInGroup(elements, shallowestGroupId);
+         if (
+           groupElements.some((el) =>
+-            isFrameLikeElement(el)
+-              ? isFrameFullyContainedByFrame(el, frame, elementsMap)
+-              : elementOverlapsWithFrame(el, frame, elementsMap),
++            elementOverlapsWithFrame(el, frame, elementsMap),
+           )
+         ) {
+           for (const child of groupElements) {
+@@ -1294,10 +1329,7 @@
+         }
+       }
+     } else {
+-      const overlaps = isFrameLikeElement(element)
+-        ? isFrameFullyContainedByFrame(element, frame, elementsMap)
+-        : elementOverlapsWithFrame(element, frame, elementsMap);
+-      if (overlaps) {
++      if (elementOverlapsWithFrame(element, frame, elementsMap)) {
+         eligibleElements.push(element);
+       }
+     }
+@@ -1690,12 +1722,6 @@
+   }
+ 
+   if (_element.groupIds.length === 0) {
+-    if (isFrameLikeElement(_element)) {
+-      if (_element.frameId === frame.id) {
+-        return elementOverlapsWithFrame(_element, frame, allElementsMap);
+-      }
+-      return isFrameFullyContainedByFrame(_element, frame, allElementsMap);
+-    }
+     return elementOverlapsWithFrame(_element, frame, allElementsMap);
+   }
+ 
+diff --git a/packages/element/src/zindex.ts b/packages/element/src/zindex.ts
+--- a/packages/element/src/zindex.ts
++++ b/packages/element/src/zindex.ts
+@@ -9,10 +9,11 @@
+ import { getElementsInGroup } from "./groups";
+ import { syncMovedIndices } from "./fractionalIndex";
+ import { getSelectedElements } from "./selection";
++import { getFrameDescendants } from "./frame";
+ import { getBoundTextElement, getContainerElement } from "./textElement";
+ import { getHoveredElementForBinding } from "./collision";
+ 
+-import { getNonDeletedElements } from ".";
++import { getNonDeletedElements, isNonDeletedElement } from ".";
+ 
+ import type { Scene } from "./Scene";
+ import type {
+@@ -53,6 +54,16 @@
+           includeElementsInFrames: true,
+         }),
+   );
++  for (const element of selectedElementIds.values()) {
++    if (!isFrameLikeElement(element)) {
++      continue;
++    }
++    for (const descendant of getFrameDescendants(elements, element.id)) {
++      if (isNonDeletedElement(descendant)) {
++        selectedElementIds.set(descendant.id, descendant);
++      }
++    }
++  }
+   while (++index < elements.length) {
+     const element = elements[index];
+     if (selectedElementIds.get(element.id)) {
+@@ -570,6 +581,16 @@
+       includeElementsInFrames: true,
+     }),
+   );
++  for (const element of elementsToMove.values()) {
++    if (!isFrameLikeElement(element)) {
++      continue;
++    }
++    for (const descendant of getFrameDescendants(allElements, element.id)) {
++      if (isNonDeletedElement(descendant)) {
++        elementsToMove.set(descendant.id, descendant);
++      }
++    }
++  }
+ 
+   const frameAwareContiguousElementsToMove: {
+     regularElements: ExcalidrawElement[];
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -753,7 +753,7 @@
+       expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
+     });
+ 
+-    it("should not nest a smaller frame that is only overlapping the larger frame", () => {
++    it("should nest a smaller frame as soon as it overlaps the larger frame", () => {
+       const largeFrame = API.createElement({
+         id: "largeFrame",
+         type: "frame",
+@@ -778,11 +778,11 @@
+         smallFrame.x + smallFrame.width / 2,
+         smallFrame.y + smallFrame.height / 2,
+       );
+-      // Drop so the small frame overlaps but is not fully inside.
+-      mouse.moveTo(largeFrame.x + largeFrame.width - 10, largeFrame.y + 40);
++      // Cursor stays outside the parent; frames only just overlap.
++      mouse.moveTo(largeFrame.x + largeFrame.width + 35, largeFrame.y + 40);
+       mouse.up();
+ 
+-      expect(API.getElement(smallFrame).frameId).toBe(null);
++      expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
+     });
+ 
+     it("should move an element dragged from one frame into another", () => {
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -196,7 +196,6 @@
+   elementOverlapsWithFrame,
+   updateFrameMembershipOfSelectedElements,
+   isElementInFrame,
+-  isFrameFullyContainedByFrame,
+   getFrameLikeTitle,
+   getElementsOverlappingFrame,
+   filterElementsEligibleAsFrameChildren,
+@@ -8593,6 +8592,8 @@
+       /** to exclude selected elements when dragging, etc. */
+       excludeElementIds?: AppState["selectedElementIds"];
+       currentFrameId?: ExcalidrawElement["frameId"];
++      /** When set, a frame is a candidate as soon as any of these overlap it. */
++      overlappingElements?: readonly ExcalidrawElement[];
+     },
+   ) => {
+     const elementsMap = this.scene.getNonDeletedElementsMap();
+@@ -8612,14 +8613,20 @@
+       }
+       return false;
+     };
++    const overlappingElements = opts?.overlappingElements ?? [];
+     const framesUnderCursor = this.scene
+       .getNonDeletedFramesLikes()
+-      .filter(
+-        (frame) =>
+-          !frame.locked &&
+-          !isExcludedDragTarget(frame) &&
+-          isCursorInFrame(sceneCoords, frame, elementsMap),
+-      );
++      .filter((frame) => {
++        if (frame.locked || isExcludedDragTarget(frame)) {
++          return false;
++        }
++        if (overlappingElements.length > 0) {
++          return overlappingElements.some((element) =>
++            elementOverlapsWithFrame(element, frame, elementsMap),
++          );
++        }
++        return isCursorInFrame(sceneCoords, frame, elementsMap);
++      });
+ 
+     if (!framesUnderCursor.length) {
+       return null;
+@@ -12034,29 +12041,17 @@
+           return;
+         }
+ 
+-        // Allow frames to be nested inside other frames only when fully inside
++        // Nest dragged frames on overlap, same as shapes.
+         let frameToHighlight = this.getTopLayerFrameAtSceneCoords(
+           pointerCoords,
+           {
+             currentFrameId: getCommonFrameId(selectedElements),
+             excludeElementIds: this.state.selectedElementIds,
++            overlappingElements: selectedElements.some(isFrameLikeElement)
++              ? selectedElements
++              : undefined,
+           },
+         );
+-        if (frameToHighlight) {
+-          const selectedFrames = selectedElements.filter(isFrameLikeElement);
+-          if (
+-            selectedFrames.length > 0 &&
+-            !selectedFrames.every((frame) =>
+-              isFrameFullyContainedByFrame(
+-                frame,
+-                frameToHighlight!,
+-                this.scene.getNonDeletedElementsMap(),
+-              ),
+-            )
+-          ) {
+-            frameToHighlight = null;
+-          }
+-        }
+         const autoLayoutDropIndicator =
+           frameToHighlight?.autoLayout && !frameToHighlight.collapsed
+             ? getAutoLayoutDropIndicator(
+@@ -13219,6 +13214,9 @@
+             {
+               currentFrameId: getCommonFrameId(selectedElements),
+               excludeElementIds: this.state.selectedElementIds,
++              overlappingElements: selectedElements.some(isFrameLikeElement)
++                ? selectedElements
++                : undefined,
+             },
+           );
+           let nextElements = this.scene.getElementsMapIncludingDeleted();
+@@ -13269,16 +13267,11 @@
+             topLayerFrame &&
+             !this.state.selectedElementIds[topLayerFrame.id]
+           ) {
+-            const elementsToAdd = selectedElements.filter((element) => {
+-              if (isFrameLikeElement(element)) {
+-                return isFrameFullyContainedByFrame(
+-                  element,
+-                  topLayerFrame,
+-                  this.scene.getNonDeletedElementsMap(),
+-                );
+-              }
+-              return isElementInFrame(element, nextElements, this.state);
+-            });
++            const elementsToAdd = selectedElements.filter((element) =>
++              isElementInFrame(element, nextElements, this.state, {
++                targetFrame: topLayerFrame,
++              }),
++            );
+ 
+             if (this.state.editingGroupId) {
+               updateGroupIdsAfterEditingGroup(elementsToAdd);

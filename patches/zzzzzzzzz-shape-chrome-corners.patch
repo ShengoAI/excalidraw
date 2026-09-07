@@ -1,0 +1,146 @@
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -1020,6 +1020,26 @@
+     element: NonDeletedExcalidrawElement,
+     appState: AppState,
+   ) => React.ReactNode;
++  /**
++   * Render a bottom-left overlay inside a shape or frame. Return `null` to skip.
++   *
++   * Positioned in the reserved footer band with 16px side and 12px bottom
++   * padding. The overlay scales and rotates with the element.
++   */
++  renderShapeBottomLeft?: (
++    element: NonDeletedExcalidrawElement,
++    appState: AppState,
++  ) => React.ReactNode;
++  /**
++   * Render a bottom-right overlay inside a shape or frame. Return `null` to skip.
++   *
++   * Positioned in the reserved footer band with 16px side and 12px bottom
++   * padding. The overlay scales and rotates with the element.
++   */
++  renderShapeBottomRight?: (
++    element: NonDeletedExcalidrawElement,
++    appState: AppState,
++  ) => React.ReactNode;
+   aiEnabled?: boolean;
+   showDeprecatedFonts?: boolean;
+   hideDefaultRotateHandle?: boolean;
+diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
+--- a/packages/excalidraw/index.tsx
++++ b/packages/excalidraw/index.tsx
+@@ -113,6 +113,8 @@
+     renderShapeFooter,
+     renderShapeTopLeft,
+     renderShapeTopRight,
++    renderShapeBottomLeft,
++    renderShapeBottomRight,
+     aiEnabled,
+     showDeprecatedFonts,
+     renderScrollbars,
+@@ -260,6 +262,8 @@
+           renderShapeFooter={renderShapeFooter}
+           renderShapeTopLeft={renderShapeTopLeft}
+           renderShapeTopRight={renderShapeTopRight}
++          renderShapeBottomLeft={renderShapeBottomLeft}
++          renderShapeBottomRight={renderShapeBottomRight}
+           aiEnabled={aiEnabled !== false}
+           showDeprecatedFonts={showDeprecatedFonts}
+           renderScrollbars={renderScrollbars}
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2608,9 +2608,20 @@
+   }
+ 
+   private renderShapeChrome() {
+-    const { renderShapeFooter, renderShapeTopLeft, renderShapeTopRight } =
+-      this.props;
+-    if (!renderShapeFooter && !renderShapeTopLeft && !renderShapeTopRight) {
++    const {
++      renderShapeFooter,
++      renderShapeTopLeft,
++      renderShapeTopRight,
++      renderShapeBottomLeft,
++      renderShapeBottomRight,
++    } = this.props;
++    if (
++      !renderShapeFooter &&
++      !renderShapeTopLeft &&
++      !renderShapeTopRight &&
++      !renderShapeBottomLeft &&
++      !renderShapeBottomRight
++    ) {
+       return null;
+     }
+ 
+@@ -2649,12 +2660,24 @@
+       const footer = renderShapeFooter?.(element, this.state);
+       const topLeft = renderShapeTopLeft?.(element, this.state);
+       const topRight = renderShapeTopRight?.(element, this.state);
++      const bottomLeft = renderShapeBottomLeft?.(element, this.state);
++      const bottomRight = renderShapeBottomRight?.(element, this.state);
+       const hideFooter =
+         isFrameLikeElement(element) && Boolean(element.collapsed);
+       const hasFooter = !hideFooter && footer != null && footer !== false;
+       const hasTopLeft = topLeft != null && topLeft !== false;
+       const hasTopRight = topRight != null && topRight !== false;
+-      if (!hasFooter && !hasTopLeft && !hasTopRight) {
++      const hasBottomLeft =
++        !hideFooter && bottomLeft != null && bottomLeft !== false;
++      const hasBottomRight =
++        !hideFooter && bottomRight != null && bottomRight !== false;
++      if (
++        !hasFooter &&
++        !hasTopLeft &&
++        !hasTopRight &&
++        !hasBottomLeft &&
++        !hasBottomRight
++      ) {
+         return null;
+       }
+ 
+@@ -2732,6 +2755,41 @@
+               {footer}
+             </div>
+           )}
++          {hasBottomLeft && (
++            <div
++              className={`${CLASSES.SHAPE_CHROME}__bottom-left`}
++              style={{
++                position: "absolute",
++                left: 0,
++                bottom: 0,
++                padding: `${SHAPE_FOOTER_PADDING.top}px 0 ${SHAPE_FOOTER_PADDING.bottom}px ${SHAPE_FOOTER_PADDING.horizontal}px`,
++                boxSizing: "border-box",
++                display: "flex",
++                alignItems: "center",
++                pointerEvents: POINTER_EVENTS.enabled,
++              }}
++            >
++              {bottomLeft}
++            </div>
++          )}
++          {hasBottomRight && (
++            <div
++              className={`${CLASSES.SHAPE_CHROME}__bottom-right`}
++              style={{
++                position: "absolute",
++                right: 0,
++                bottom: 0,
++                padding: `${SHAPE_FOOTER_PADDING.top}px ${SHAPE_FOOTER_PADDING.horizontal}px ${SHAPE_FOOTER_PADDING.bottom}px 0`,
++                boxSizing: "border-box",
++                display: "flex",
++                alignItems: "center",
++                justifyContent: "flex-end",
++                pointerEvents: POINTER_EVENTS.enabled,
++              }}
++            >
++              {bottomRight}
++            </div>
++          )}
+         </div>
+       );
+ 

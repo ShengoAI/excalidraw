@@ -1,0 +1,54 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2191,6 +2191,7 @@
+ 
+     const isDarkTheme = this.state.theme === THEME.DARK;
+     const nonDeletedFramesLikes = this.scene.getNonDeletedFramesLikes();
++    const elementsMap = this.scene.getNonDeletedElementsMap();
+ 
+     const focusedSearchMatch =
+       nonDeletedFramesLikes.length > 0
+@@ -2203,6 +2204,13 @@
+         : null;
+ 
+     return nonDeletedFramesLikes.map((f) => {
++      if (isElementHidden(f, elementsMap)) {
++        if (this.state.editingFrame === f.id) {
++          this.resetEditingFrame(f);
++        }
++        return null;
++      }
++
+       if (
+         !isElementInViewport(
+           f,
+@@ -2215,7 +2223,7 @@
+             scrollY: this.state.scrollY,
+             zoom: this.state.zoom,
+           },
+-          this.scene.getNonDeletedElementsMap(),
++          elementsMap,
+         )
+       ) {
+         if (this.state.editingFrame === f.id) {
+@@ -2397,7 +2405,7 @@
+ 
+       return this.getFrameNameClipPaths(
+         f,
+-        this.scene.getNonDeletedElementsMap(),
++        elementsMap,
+       ).reduce(
+         (child, clipPath, index) => (
+           <div
+@@ -2686,6 +2694,10 @@
+     const scale = this.state.zoom.value;
+     const elementsMap = this.scene.getNonDeletedElementsMap();
+     return this.scene.getNonDeletedElements().map((element) => {
++      if (isElementHidden(element, elementsMap)) {
++        return null;
++      }
++
+       if (
+         !(
+           isFrameLikeElement(element) ||

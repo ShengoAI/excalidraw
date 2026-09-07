@@ -1,0 +1,79 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2313,7 +2313,7 @@
+         frameNameJSX = <span style={titleWrapStyle}>{frameName}</span>;
+       }
+ 
+-      return (
++      const frameNameElement = (
+         <div
+           id={this.getFrameNameDOMId(f)}
+           className={CLASSES.FRAME_NAME}
+@@ -2393,8 +2393,66 @@
+         >
+           {frameNameJSX}
+         </div>
++      );
++
++      return this.getFrameNameClipPaths(
++        f,
++        this.scene.getNonDeletedElementsMap(),
++      ).reduce(
++        (child, clipPath, index) => (
++          <div
++            key={`${f.id}-title-clip-${index}`}
++            style={{
++              position: "absolute",
++              inset: 0,
++              clipPath,
++              pointerEvents: POINTER_EVENTS.disabled,
++            }}
++          >
++            {child}
++          </div>
++        ),
++        frameNameElement,
+       );
+     });
++  };
++
++  private getFrameNameClipPaths = (
++    frame: ExcalidrawFrameLikeElement,
++    elementsMap: NonDeletedSceneElementsMap,
++  ) => {
++    const clipPaths: string[] = [];
++    for (const ancestor of [
++      ...getAncestorFrames(frame, elementsMap),
++    ].reverse()) {
++      if (!shouldApplyFrameClip(frame, ancestor, this.state, elementsMap)) {
++        continue;
++      }
++
++      const center = pointFrom(
++        ancestor.x + ancestor.width / 2,
++        ancestor.y + ancestor.height / 2,
++      );
++      const points = [
++        pointFrom(ancestor.x, ancestor.y),
++        pointFrom(ancestor.x + ancestor.width, ancestor.y),
++        pointFrom(
++          ancestor.x + ancestor.width,
++          ancestor.y + ancestor.height,
++        ),
++        pointFrom(ancestor.x, ancestor.y + ancestor.height),
++      ]
++        .map((corner) => pointRotateRads(corner, center, ancestor.angle))
++        .map(([sceneX, sceneY]) =>
++          sceneCoordsToViewportCoords({ sceneX, sceneY }, this.state),
++        )
++        .map(
++          ({ x, y }) =>
++            `${x - this.state.offsetLeft}px ${y - this.state.offsetTop}px`,
++        );
++      clipPaths.push(`polygon(${points.join(", ")})`);
++    }
++    return clipPaths;
+   };
+ 
+   private getFrameNameChromeOffset = (frame: ExcalidrawFrameLikeElement) => {

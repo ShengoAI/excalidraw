@@ -1,0 +1,56 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -7690,12 +7690,28 @@
+           : undefined;
+         }
+
+-        return containingFrame && this.state.frameRendering.clip
+-          ? isCursorInFrame(
+-              { x, y },
+-              containingFrame as NonDeleted<ExcalidrawFrameLikeElement>,
+-              elementsMap,
+-            )
+-          : true;
++        // Check clipping for all ancestor frames, considering both global and per-frame settings
++        if (!containingFrame) {
++          return true;
++        }
++
++        const ancestors = getAncestorFrames(element, elementsMap);
++        for (const ancestorFrame of ancestors) {
++          // Clip if global clipping is enabled (unless frame explicitly disabled it)
++          const shouldClipByFrame =
++            this.state.frameRendering.clip && ancestorFrame.clip !== false;
++
++          if (
++            shouldClipByFrame &&
++            !isCursorInFrame(
++              { x, y },
++              ancestorFrame as NonDeleted<ExcalidrawFrameLikeElement>,
++              elementsMap,
++            )
++          ) {
++            return false;
++          }
++        }
++
++        return true;
+       })
+       .filter((el) => {
+diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
+--- a/packages/excalidraw/renderer/staticScene.ts
++++ b/packages/excalidraw/renderer/staticScene.ts
+@@ -412,11 +412,7 @@
+
+         context.save();
+
+-        if (
+-          frameId &&
+-          appState.frameRendering.enabled &&
+-          appState.frameRendering.clip
+-        ) {
++        if (frameId && appState.frameRendering.enabled) {
+           // Get all ancestor frames for nested frame clipping
+           // Apply clips from outermost to innermost so they intersect correctly
+           const ancestorFrames = getAncestorFrames(element, elementsMap);

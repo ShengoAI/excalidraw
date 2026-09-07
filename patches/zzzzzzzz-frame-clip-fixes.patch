@@ -1,56 +1,172 @@
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
-@@ -7690,12 +7690,28 @@
-           : undefined;
+@@ -7689,13 +7689,24 @@
+             : undefined;
          }
 
 -        return containingFrame && this.state.frameRendering.clip
 -          ? isCursorInFrame(
 -              { x, y },
 -              containingFrame as NonDeleted<ExcalidrawFrameLikeElement>,
--              elementsMap,
--            )
--          : true;
-+        // Check clipping for all ancestor frames, considering both global and per-frame settings
 +        if (!containingFrame) {
 +          return true;
 +        }
 +
-+        const ancestors = getAncestorFrames(element, elementsMap);
-+        for (const ancestorFrame of ancestors) {
-+          // Clip if global clipping is enabled (unless frame explicitly disabled it)
-+          const shouldClipByFrame =
-+            this.state.frameRendering.clip && ancestorFrame.clip !== false;
-+
-+          if (
-+            shouldClipByFrame &&
-+            !isCursorInFrame(
++        return getAncestorFrames(element, elementsMap).every(
++          (ancestorFrame) =>
++            !shouldApplyFrameClip(
++              element,
++              ancestorFrame,
++              this.state,
+               elementsMap,
+-            )
+-          : true;
++            ) ||
++            isCursorInFrame(
 +              { x, y },
 +              ancestorFrame as NonDeleted<ExcalidrawFrameLikeElement>,
 +              elementsMap,
-+            )
-+          ) {
-+            return false;
-+          }
-+        }
-+
-+        return true;
++            ),
++        );
        })
        .filter((el) => {
+         // The parameter elements comes ordered from lower z-index to higher.
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1803,7 +1803,7 @@
+   // Members stay clipped even when they sit fully outside the frame bounds.
+   // While dragging a child out (and not the frame itself), unclip once it no
+   // longer overlaps so the user can see it leave.
+-  if (element.frameId === frame.id) {
++  if (isElementDescendantOfFrame(element, frame.id, elementsMap)) {
+     if (
+       appState.selectedElementsAreBeingDragged &&
+       appState.selectedElementIds[element.id] &&
 diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
 --- a/packages/excalidraw/renderer/staticScene.ts
 +++ b/packages/excalidraw/renderer/staticScene.ts
-@@ -412,11 +412,7 @@
-
+@@ -412,9 +412,7 @@
          context.save();
 
--        if (
+         if (
 -          frameId &&
 -          appState.frameRendering.enabled &&
 -          appState.frameRendering.clip
--        ) {
-+        if (frameId && appState.frameRendering.enabled) {
++          frameId && appState.frameRendering.enabled
+         ) {
            // Get all ancestor frames for nested frame clipping
            // Apply clips from outermost to innermost so they intersect correctly
-           const ancestorFrames = getAncestorFrames(element, elementsMap);
+@@ -531,9 +529,7 @@
+         const frameId = element.frameId || appState.frameToHighlight?.id;
+
+         if (
+-          frameId &&
+-          appState.frameRendering.enabled &&
+-          appState.frameRendering.clip
++          frameId && appState.frameRendering.enabled
+         ) {
+           context.save();
+
+diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
+--- a/packages/excalidraw/renderer/renderNewElementScene.ts
++++ b/packages/excalidraw/renderer/renderNewElementScene.ts
+@@ -55,9 +55,7 @@
+       const frameId = newElement.frameId || appState.frameToHighlight?.id;
+
+       if (
+-        frameId &&
+-        appState.frameRendering.enabled &&
+-        appState.frameRendering.clip
++        frameId && appState.frameRendering.enabled
+       ) {
+         // Get all ancestor frames for nested frame clipping
+         const ancestorFrames = getAncestorFrames(newElement, elementsMap);
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -14,7 +14,10 @@
+
+ import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+
+-import { elementOverlapsWithFrame } from "../src/frame";
++import {
++  elementOverlapsWithFrame,
++  shouldApplyFrameClip,
++} from "../src/frame";
+
+ import type {
+   ExcalidrawElement,
+@@ -1323,7 +1326,71 @@
+     expect(h.state.selectedElementIds[child.id]).toBe(true);
+     expect(h.state.selectedElementIds[frame.id]).toBeUndefined();
+   });
++
++  it("selects the visible part of a child outside a frame when clipping is off", () => {
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 100,
++      height: 100,
++    });
++    const child = API.createElement({
++      id: "child",
++      type: "rectangle",
++      x: 120,
++      y: 20,
++      width: 40,
++      height: 40,
++      backgroundColor: "#ffc9c9",
++      fillStyle: "solid",
++      frameId: frame.id,
++    });
+
++    API.setElements([frame, child]);
++    API.setAppState({
++      frameRendering: { ...h.state.frameRendering, clip: false },
++    });
++    mouse.clickAt(140, 40);
++
++    expect(h.state.selectedElementIds[child.id]).toBe(true);
++  });
++
++  it("clips nested descendants to every clipped ancestor", () => {
++    const outerFrame = API.createElement({
++      id: "outer-frame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 100,
++      height: 100,
++    });
++    const innerFrame = API.createElement({
++      id: "inner-frame",
++      type: "frame",
++      x: 50,
++      y: 0,
++      width: 100,
++      height: 100,
++      frameId: outerFrame.id,
++    });
++    const child = API.createElement({
++      id: "nested-child",
++      type: "rectangle",
++      x: 110,
++      y: 20,
++      width: 20,
++      height: 20,
++      frameId: innerFrame.id,
++    });
++    const elementsMap = arrayToMap([outerFrame, innerFrame, child]);
++
++    expect(
++      shouldApplyFrameClip(child, outerFrame, h.state, elementsMap),
++    ).toBe(true);
++  });
++
+   it("selects a filled child even when the frame is in front", () => {
+     const child = API.createElement({
+       id: "child",

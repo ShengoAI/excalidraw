@@ -1,0 +1,124 @@
+diff --git a/packages/common/src/utils.ts b/packages/common/src/utils.ts
+--- a/packages/common/src/utils.ts
++++ b/packages/common/src/utils.ts
+@@ -139,11 +139,15 @@ export const getFontFamilyString = ({
+ export const getFontString = ({
+   fontSize,
+   fontFamily,
++  customData,
+ }: {
+   fontSize: number;
+   fontFamily: FontFamilyValues;
++  customData?: Record<string, any>;
+ }) => {
+-  return `${fontSize}px ${getFontFamilyString({ fontFamily })}` as FontString;
++  const fontStyle = customData?.shengoTextItalic === true ? "italic " : "";
++  const fontWeight = customData?.shengoTextBold === true ? "700 " : "";
++  return `${fontStyle}${fontWeight}${fontSize}px ${getFontFamilyString({ fontFamily })}` as FontString;
+ };
+ 
+ /** executes callback in the frame that's after the current one */
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2348,6 +2348,12 @@ class App extends React.Component<AppProps, AppState> {
+               fontFamily: getFrameNameFontFamily(f),
+             }),
+             fontSize: getFrameNameFontSize(f) * this.state.zoom.value,
++            fontWeight: f.customData?.shengoTextBold === true ? 700 : 400,
++            fontStyle: f.customData?.shengoTextItalic === true ? "italic" : "normal",
++            textDecoration: [
++              f.customData?.shengoTextUnderline === true ? "underline" : "",
++              f.customData?.shengoTextStrikethrough === true ? "line-through" : "",
++            ].filter(Boolean).join(" ") || "none",
+             color: getFrameNameColor(f, isDarkTheme),
+             lineHeight: FRAME_STYLE.nameLineHeight,
+             width: `${
+diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
+--- a/packages/excalidraw/scene/export.ts
++++ b/packages/excalidraw/scene/export.ts
+@@ -122,6 +122,7 @@ const addFrameLabelsAsTextElements = (
+           strokeColor: getFrameNameColor(element, opts.exportWithDarkMode),
+           text: getFrameLikeTitle(element),
+           textAlign: nameAlign,
++          customData: element.customData,
+         });
+ 
+       textElement = truncateText(textElement, maxWidth);
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -564,8 +564,34 @@ const drawElementOnCanvas = (
+         for (let index = 0; index < lines.length; index++) {
++          const line = lines[index];
++          const baseline = index * lineHeightPx + verticalOffset;
+           context.fillText(
+-            lines[index],
++            line,
+             horizontalOffset,
+-            index * lineHeightPx + verticalOffset,
++            baseline,
+           );
++          if (
++            element.customData?.shengoTextUnderline === true ||
++            element.customData?.shengoTextStrikethrough === true
++          ) {
++            const lineWidth = context.measureText(line).width;
++            const lineStart =
++              element.textAlign === "center"
++                ? horizontalOffset - lineWidth / 2
++                : element.textAlign === "right"
++                  ? horizontalOffset - lineWidth
++                  : horizontalOffset;
++            context.beginPath();
++            context.lineWidth = Math.max(1, element.fontSize / 16);
++            context.strokeStyle = context.fillStyle as string;
++            if (element.customData?.shengoTextUnderline === true) {
++              context.moveTo(lineStart, baseline + Math.max(2, element.fontSize * 0.08));
++              context.lineTo(lineStart + lineWidth, baseline + Math.max(2, element.fontSize * 0.08));
++            }
++            if (element.customData?.shengoTextStrikethrough === true) {
++              context.moveTo(lineStart, baseline - element.fontSize * 0.3);
++              context.lineTo(lineStart + lineWidth, baseline - element.fontSize * 0.3);
++            }
++            context.stroke();
++          }
+         }
+         context.restore();
+diff --git a/packages/excalidraw/renderer/staticSvgScene.ts b/packages/excalidraw/renderer/staticSvgScene.ts
+--- a/packages/excalidraw/renderer/staticSvgScene.ts
++++ b/packages/excalidraw/renderer/staticSvgScene.ts
+@@ -669,5 +669,18 @@ const renderElementToSvg = (
+           text.setAttribute("y", `${i * lineHeightPx + verticalOffset}`);
+           text.setAttribute("font-family", getFontFamilyString(element));
+           text.setAttribute("font-size", `${element.fontSize}px`);
++          if (element.customData?.shengoTextBold === true) {
++            text.setAttribute("font-weight", "700");
++          }
++          if (element.customData?.shengoTextItalic === true) {
++            text.setAttribute("font-style", "italic");
++          }
++          const textDecorations = [
++            element.customData?.shengoTextUnderline === true ? "underline" : null,
++            element.customData?.shengoTextStrikethrough === true ? "line-through" : null,
++          ].filter(Boolean);
++          if (textDecorations.length > 0) {
++            text.setAttribute("text-decoration", textDecorations.join(" "));
++          }
+           text.setAttribute(
+             "fill",
+diff --git a/packages/excalidraw/wysiwyg/textWysiwyg.tsx b/packages/excalidraw/wysiwyg/textWysiwyg.tsx
+--- a/packages/excalidraw/wysiwyg/textWysiwyg.tsx
++++ b/packages/excalidraw/wysiwyg/textWysiwyg.tsx
+@@ -388,3 +388,11 @@ const updateWysiwygStyle = () => {
+       Object.assign(editable.style, {
+         font,
++        textDecoration: [
++          updatedTextElement.customData?.shengoTextUnderline === true
++            ? "underline"
++            : "",
++          updatedTextElement.customData?.shengoTextStrikethrough === true
++            ? "line-through"
++            : "",
++        ].filter(Boolean).join(" ") || "none",
+         // must be defined *after* font ¯\_(ツ)_/¯

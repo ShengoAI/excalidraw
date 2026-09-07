@@ -1,0 +1,127 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -39,6 +39,7 @@
+   isElementHidden,
+   isFrameElement,
+   isFrameLikeElement,
++  isLinearElement,
+   isTextElement,
+ } from "./typeChecks";
+ 
+@@ -1404,6 +1405,7 @@
+   const commonFrameId = getCommonFrameId(elementsToAdd);
+ 
+   const finalElementsToAdd = new Set<ExcalidrawElement>();
++  const elementsToAddIds = new Set(elementsToAdd.map((element) => element.id));
+ 
+   const otherFrames = new Set<ExcalidrawFrameLikeElement["id"]>();
+ 
+@@ -1428,6 +1430,26 @@
+     // don't add a frame to itself
+     if (isFrameLikeElement(element) && element.id === frame.id) {
+       continue;
++    }
++
++    if (isLinearElement(element)) {
++      const hasBoundEndpointOutsideFrame = [
++        element.startBinding,
++        element.endBinding,
++      ].some((binding) => {
++        if (!binding) {
++          return false;
++        }
++        const boundElement = elementsMap.get(binding.elementId);
++        return (
++          !!boundElement &&
++          !elementsToAddIds.has(boundElement.id) &&
++          !isElementDescendantOfFrame(boundElement, frame.id, elementsMap)
++        );
++      });
++      if (hasBoundEndpointOutsideFrame) {
++        continue;
++      }
+     }
+ 
+     finalElementsToAdd.add(element);
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -3,6 +3,7 @@
+   Excalidraw,
+ } from "@excalidraw/excalidraw";
+ import { arrayToMap, FRAME_STYLE } from "@excalidraw/common";
++import { pointFrom } from "@excalidraw/math";
+ 
+ import { API } from "@excalidraw/excalidraw/tests/helpers/api";
+ import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
+@@ -15,6 +16,7 @@
+ import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+ 
+ import {
++  addElementsToFrame,
+   elementOverlapsWithFrame,
+   shouldApplyFrameClip,
+ } from "../src/frame";
+@@ -28,7 +30,61 @@
+ 
+ const { h } = window;
+ const mouse = new Pointer("mouse");
++
++describe("bound connector frame membership", () => {
++  it("keeps a connector outside when an endpoint remains outside the frame", () => {
++    const frame = API.createElement({
++      id: "frame",
++      type: "frame",
++      x: 100,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const circle = API.createElement({
++      id: "circle",
++      type: "ellipse",
++      x: 0,
++      y: 50,
++      width: 40,
++      height: 40,
++    });
++    const square = API.createElement({
++      id: "square",
++      type: "rectangle",
++      x: 140,
++      y: 50,
++      width: 40,
++      height: 40,
++    });
++    const connector = API.createElement({
++      id: "connector",
++      type: "arrow",
++      x: 40,
++      y: 70,
++      points: [pointFrom(0, 0), pointFrom(100, 0)],
++      startBinding: {
++        elementId: circle.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: square.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    const elementsMap = arrayToMap([circle, connector, square, frame]);
+ 
++    addElementsToFrame(elementsMap, [connector, square], frame);
++
++    expect(square.frameId).toBe(frame.id);
++    expect(connector.frameId).toBe(null);
++    expect(connector.startBinding?.elementId).toBe(circle.id);
++    expect(connector.endBinding?.elementId).toBe(square.id);
++  });
++});
++
+ describe("adding elements to frames", () => {
+   type ElementType = string;
+   const assertOrder = (

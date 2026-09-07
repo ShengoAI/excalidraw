@@ -150,7 +150,7 @@ diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/fram
        const largeFrame = API.createElement({
          id: "largeFrame",
          type: "frame",
-@@ -778,11 +778,11 @@
+@@ -778,11 +778,43 @@
          smallFrame.x + smallFrame.width / 2,
          smallFrame.y + smallFrame.height / 2,
        );
@@ -164,6 +164,38 @@ diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/fram
 +      expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
      });
  
++    it("should target a frame as soon as a dragged shape overlaps it", () => {
++      const largeFrame = API.createElement({
++        id: "largeFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 150,
++        height: 150,
++      });
++      const shape = API.createElement({
++        id: "shape",
++        type: "rectangle",
++        x: 200,
++        y: 0,
++        width: 80,
++        height: 80,
++      });
++
++      API.setElements([largeFrame, shape]);
++
++      mouse.clickAt(shape.x, shape.y);
++      mouse.downAt(shape.x + shape.width / 2, shape.y + shape.height / 2);
++      // Only the shape's leading edge enters; the cursor stays outside.
++      mouse.moveTo(largeFrame.x + largeFrame.width + 35, largeFrame.y + 40);
++
++      expect(h.state.frameToHighlight?.id).toBe(largeFrame.id);
++
++      mouse.up();
++
++      expect(API.getElement(shape).frameId).toBe(largeFrame.id);
++    });
++
      it("should move an element dragged from one frame into another", () => {
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
 --- a/packages/excalidraw/components/App.tsx
@@ -212,10 +244,27 @@ diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/compon
  
      if (!framesUnderCursor.length) {
        return null;
-@@ -12034,29 +12041,17 @@
+@@ -12034,29 +12041,32 @@
            return;
          }
  
++        const projectedDragOffset = {
++          x: pointerCoords.x - pointerDownState.drag.origin.x,
++          y: pointerCoords.y - pointerDownState.drag.origin.y,
++        };
++        const projectedSelectedElements = selectedElements.map((element) => {
++          const originalElement = pointerDownState.originalElements.get(
++            element.id,
++          );
++          return originalElement
++            ? {
++                ...originalElement,
++                x: originalElement.x + projectedDragOffset.x,
++                y: originalElement.y + projectedDragOffset.y,
++              }
++            : element;
++        });
++
 -        // Allow frames to be nested inside other frames only when fully inside
 +        // Nest dragged frames on overlap, same as shapes.
          let frameToHighlight = this.getTopLayerFrameAtSceneCoords(
@@ -223,9 +272,7 @@ diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/compon
            {
              currentFrameId: getCommonFrameId(selectedElements),
              excludeElementIds: this.state.selectedElementIds,
-+            overlappingElements: selectedElements.some(isFrameLikeElement)
-+              ? selectedElements
-+              : undefined,
++            overlappingElements: projectedSelectedElements,
            },
          );
 -        if (frameToHighlight) {
@@ -246,13 +293,11 @@ diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/compon
          const autoLayoutDropIndicator =
            frameToHighlight?.autoLayout && !frameToHighlight.collapsed
              ? getAutoLayoutDropIndicator(
-@@ -13219,6 +13214,9 @@
+@@ -13219,6 +13214,7 @@
              {
                currentFrameId: getCommonFrameId(selectedElements),
                excludeElementIds: this.state.selectedElementIds,
-+              overlappingElements: selectedElements.some(isFrameLikeElement)
-+                ? selectedElements
-+                : undefined,
++              overlappingElements: selectedElements,
              },
            );
            let nextElements = this.scene.getElementsMapIncludingDeleted();

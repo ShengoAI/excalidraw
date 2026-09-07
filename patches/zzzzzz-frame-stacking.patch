@@ -317,7 +317,7 @@ diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/r
    // Paint visible elements
    visibleElements
      .filter((el) => !isIframeLikeElement(el))
-@@ -404,6 +400,15 @@
+@@ -404,6 +400,25 @@
            return;
          }
  
@@ -327,6 +327,16 @@ diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/r
 +          const containingFrame = getContainingFrame(element, elementsMap);
 +          if (containingFrame) {
 +            ensureFrameFill(containingFrame);
++          }
++          // The drag preview is sorted into the target frame's child slot, but
++          // it does not receive the target frameId until pointerup. Paint the
++          // prospective parent's fill before the preview so the frame cannot
++          // cover the dragged element in the meantime.
++          if (
++            appState.frameToHighlight &&
++            appState.selectedElementIds[element.id]
++          ) {
++            ensureFrameFill(appState.frameToHighlight);
 +          }
 +        }
 +

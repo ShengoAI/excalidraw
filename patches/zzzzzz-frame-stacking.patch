@@ -555,3 +555,157 @@ diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/compon
  
      if (hitElement) {
        if (
+diff --git a/packages/excalidraw/scene/Renderer.ts b/packages/excalidraw/scene/Renderer.ts
+index 2d0ef1efe..73b1b5835 100644
+--- a/packages/excalidraw/scene/Renderer.ts
++++ b/packages/excalidraw/scene/Renderer.ts
+@@ -1,16 +1,9 @@
+-import {
+-  getCommonFrameId,
+-  getFrameChildrenInsertionIndex,
+-  isElementHidden,
+-  isElementInViewport,
+-} from "@excalidraw/element";
++import { isElementHidden, isElementInViewport } from "@excalidraw/element";
+ 
+ import { arrayToMap, memoize, toBrandedType } from "@excalidraw/common";
+ 
+ import type {
+   ExcalidrawElement,
+-  ExcalidrawFrameLikeElement,
+-  NonDeleted,
+   NonDeletedElementsMap,
+   NonDeletedExcalidrawElement,
+ } from "@excalidraw/element/types";
+@@ -121,44 +114,26 @@ export class Renderer {
+     return { elementsMap, newElementCanvasElement };
+   }
+ 
+-  private sortSelectedElementsIntoHighlightedFrame<
+-    T extends ExcalidrawElement,
+-  >({
++  private renderDraggedElementsOnTop<T extends ExcalidrawElement>({
+     visibleElements,
+     selectedElements,
+-    frameToHighlight,
+   }: {
+     selectedElements: readonly NonDeletedExcalidrawElement[];
+     visibleElements: readonly T[];
+-    frameToHighlight: NonDeleted<ExcalidrawFrameLikeElement>;
+   }): readonly T[] {
+     if (!selectedElements.length) {
+       return visibleElements;
+     }
+ 
+-    // we assume all selected elements are eligible frame children if
+-    // frameToHighlight is defined
+     const selectedElementsMap = arrayToMap(selectedElements);
+-
+-    // thus, all deselected elements are the ones we won't reorder
+     const deselectedElements = visibleElements.filter(
+       (element) => !selectedElementsMap.has(element.id),
+     );
+-
+-    const insertionIndex = getFrameChildrenInsertionIndex(
+-      deselectedElements,
+-      frameToHighlight.id,
++    const draggedElements = visibleElements.filter((element) =>
++      selectedElementsMap.has(element.id),
+     );
+ 
+-    if (insertionIndex === null) {
+-      return visibleElements;
+-    }
+-
+-    return [
+-      ...deselectedElements.slice(0, insertionIndex),
+-      ...selectedElements,
+-      ...deselectedElements.slice(insertionIndex),
+-    ] as readonly T[];
++    return [...deselectedElements, ...draggedElements] as readonly T[];
+   }
+ 
+   private _getRenderableElements = memoize(
+@@ -232,21 +207,13 @@ export class Renderer {
+       newElement: opts.newElement,
+     });
+ 
+-    // if we're dragging elements over a frame, reorder the selected elements
+-    // inside the frame during render (we don't set the `element.frameId` until
+-    // pointerup else we'd have to painstainly restore the orig index if user
+-    // didn't end up adding elements to the frame)
+-    if (
+-      opts.frameToHighlight &&
+-      opts.selectedElementsAreBeingDragged &&
+-      // if all dragged elements are already in the frame, don't reorder
+-      getCommonFrameId(opts.selectedElements) !== opts.frameToHighlight.id
+-    ) {
++    // Keep the active drag preview above frames and other scene elements for
++    // the whole gesture. Frame membership and permanent z-order are still
++    // resolved only on pointerup.
++    if (opts.selectedElementsAreBeingDragged) {
+-      const reorderedVisibleElements =
+-        this.sortSelectedElementsIntoHighlightedFrame({
+-          visibleElements: ret.visibleElements,
+-          selectedElements: opts.selectedElements,
+-          frameToHighlight: opts.frameToHighlight,
+-        });
++      const reorderedVisibleElements = this.renderDraggedElementsOnTop({
++        visibleElements: ret.visibleElements,
++        selectedElements: opts.selectedElements,
++      });
+ 
+       return {
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 863d9fefe..532be1008 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -992,6 +992,7 @@ describe("adding elements to frames", () => {
+ 
+       const getRenderableElementIds = (
+         selectedElementsAreBeingDragged: boolean,
++        frameToHighlight: NonDeleted<ExcalidrawFrameLikeElement> | null = frame,
+       ) => {
+         return h.app.renderer
+           .getRenderableElements({
+@@ -1006,7 +1007,7 @@ describe("adding elements to frames", () => {
+             newElement: h.state.newElement,
+             selectedElements: getSelectedElements(h.elements, h.state),
+             selectedElementsAreBeingDragged,
+-            frameToHighlight: frame as NonDeleted<ExcalidrawFrameLikeElement>,
++            frameToHighlight,
+           })
+           .visibleElements.map((element) => element.id);
+       };
+@@ -1021,6 +1022,11 @@ describe("adding elements to frames", () => {
+         frame.id,
+         frameChild.id,
+       ]);
++      expect(getRenderableElementIds(true, null)).toEqual([
++        frame.id,
++        frameChild.id,
++        rect2.id,
++      ]);
+       expect(getRenderableElementIds(true)).toEqual([
+         frame.id,
+         frameChild.id,
+@@ -1034,7 +1040,7 @@ describe("adding elements to frames", () => {
+       expect(rect2.frameId).toBe(null);
+     });
+ 
+-    it("should not preview reorder dragged elements already in the highlighted frame", () => {
++    it("should preview a dragged frame child above its siblings", () => {
+       const frameChild = API.createElement({
+         id: "frameChild",
+         type: "rectangle",
+@@ -1075,9 +1081,9 @@ describe("adding elements to frames", () => {
+         .visibleElements.map((element) => element.id);
+ 
+       expect(renderableElementIds).toEqual([
+-        frameChild.id,
+         frame.id,
+         otherFrameChild.id,
++        frameChild.id,
+       ]);
+     });
+ 

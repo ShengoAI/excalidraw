@@ -1,0 +1,378 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 00823f8c0..ecb8105bc 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -194,11 +194,12 @@ import {
+   pickHitWithFrameStacking,
+   shouldApplyFrameClip,
+   elementOverlapsWithFrame,
+-  updateFrameMembershipOfSelectedElements,
+   isElementInFrame,
+   getFrameLikeTitle,
+   getElementsOverlappingFrame,
+   filterElementsEligibleAsFrameChildren,
++  setCursorFrameDropTargets,
++  moveAllRight,
+   hitElementBoundText,
+   hitElementBoundingBoxOnly,
+   hitElementItself,
+@@ -9098,8 +9099,6 @@ class App extends React.Component<AppProps, AppState> {
+       /** to exclude selected elements when dragging, etc. */
+       excludeElementIds?: AppState["selectedElementIds"];
+       currentFrameId?: ExcalidrawElement["frameId"];
+-      /** When set, a frame is a candidate as soon as any of these overlap it. */
+-      overlappingElements?: readonly ExcalidrawElement[];
+     },
+   ) => {
+     const elementsMap = this.scene.getNonDeletedElementsMap();
+@@ -9119,20 +9118,14 @@ class App extends React.Component<AppProps, AppState> {
+       }
+       return false;
+     };
+-    const overlappingElements = opts?.overlappingElements ?? [];
+     const framesUnderCursor = this.scene
+       .getNonDeletedFramesLikes()
+-      .filter((frame) => {
+-        if (frame.locked || isExcludedDragTarget(frame)) {
+-          return false;
+-        }
+-        if (overlappingElements.length > 0) {
+-          return overlappingElements.some((element) =>
+-            elementOverlapsWithFrame(element, frame, elementsMap),
+-          );
+-        }
+-        return isCursorInFrame(sceneCoords, frame, elementsMap);
+-      });
++      .filter(
++        (frame) =>
++          !frame.locked &&
++          !isExcludedDragTarget(frame) &&
++          isCursorInFrame(sceneCoords, frame, elementsMap),
++      );
+ 
+     if (!framesUnderCursor.length) {
+       return null;
+@@ -12547,32 +12540,14 @@ class App extends React.Component<AppProps, AppState> {
+           return;
+         }
+ 
+-        const projectedDragOffset = {
+-          x: pointerCoords.x - pointerDownState.drag.origin.x,
+-          y: pointerCoords.y - pointerDownState.drag.origin.y,
+-        };
+-        const projectedSelectedElements = selectedElements.map((element) => {
+-          const originalElement = pointerDownState.originalElements.get(
+-            element.id,
+-          );
+-          return originalElement
+-            ? {
+-                ...originalElement,
+-                x: originalElement.x + projectedDragOffset.x,
+-                y: originalElement.y + projectedDragOffset.y,
+-              }
+-            : element;
+-        });
+-
+-        // Nest dragged frames on overlap, same as shapes.
+         let frameToHighlight = this.getTopLayerFrameAtSceneCoords(
+           pointerCoords,
+           {
+             currentFrameId: getCommonFrameId(selectedElements),
+             excludeElementIds: this.state.selectedElementIds,
+-            overlappingElements: projectedSelectedElements,
+           },
+         );
++        setCursorFrameDropTargets(selectedElements, frameToHighlight);
+         const autoLayoutDropIndicator =
+           frameToHighlight?.autoLayout && !frameToHighlight.collapsed
+             ? getAutoLayoutDropIndicator(
+@@ -12792,6 +12767,26 @@ class App extends React.Component<AppProps, AppState> {
+               snapOffset,
+               event[KEYS.CTRL_OR_CMD] ? null : this.getEffectiveGridSize(),
+             );
++
++            if (!frameToHighlight) {
++              const elementsToDetach = selectedElements.filter(
++                (element) =>
++                  element.frameId &&
++                  !this.state.selectedElementIds[element.frameId],
++              );
++              if (elementsToDetach.length > 0) {
++                removeElementsFromFrame(
++                  elementsToDetach,
++                  this.scene.getElementsMapIncludingDeleted(),
++                );
++                this.scene.replaceAllElements(
++                  moveAllRight(
++                    this.scene.getElementsIncludingDeleted(),
++                    this.state,
++                  ),
++                );
++              }
++            }
+           }
+ 
+           this.setState({
+@@ -13229,6 +13224,7 @@ class App extends React.Component<AppProps, AppState> {
+   ): (event: PointerEvent) => void {
+     return withBatchedUpdates((childEvent: PointerEvent) => {
+       const elementsMap = this.scene.getNonDeletedElementsMap();
++      const frameToHighlightOnPointerUp = this.state.frameToHighlight;
+ 
+       this.removePointer(childEvent);
+       pointerDownState.drag.blockDragging = false;
+@@ -13477,6 +13473,13 @@ class App extends React.Component<AppProps, AppState> {
+         pointerDownState.eventListeners.onKeyUp!,
+       );
+ 
++      if (pointerDownState.drag.hasOccurred) {
++        setCursorFrameDropTargets(
++          this.scene.getSelectedElements(this.state),
++          frameToHighlightOnPointerUp,
++        );
++      }
++
+       this.props?.onPointerUp?.(activeTool, pointerDownState);
+       this.onPointerUpEmitter.trigger(
+         this.state.activeTool,
+@@ -13730,14 +13733,7 @@ class App extends React.Component<AppProps, AppState> {
+         } else {
+           // update the relationships between selected elements and frames
+           const selectedElements = this.scene.getSelectedElements(this.state);
+-          const topLayerFrame = this.getTopLayerFrameAtSceneCoords(
+-            sceneCoords,
+-            {
+-              currentFrameId: getCommonFrameId(selectedElements),
+-              excludeElementIds: this.state.selectedElementIds,
+-              overlappingElements: selectedElements,
+-            },
+-          );
++          const topLayerFrame = frameToHighlightOnPointerUp;
+           let nextElements = this.scene.getElementsMapIncludingDeleted();
+ 
+           const updateGroupIdsAfterEditingGroup = (
+@@ -13811,13 +13807,16 @@ class App extends React.Component<AppProps, AppState> {
+ 
+               updateGroupIdsAfterEditingGroup(elementsToRemove);
+             }
+-          }
+ 
+-          nextElements = updateFrameMembershipOfSelectedElements(
+-            nextElements,
+-            this.state,
+-            this,
+-          );
++            removeElementsFromFrame(
++              selectedElements.filter(
++                (element) =>
++                  element.frameId &&
++                  !this.state.selectedElementIds[element.frameId],
++              ),
++              nextElements,
++            );
++          }
+ 
+           if (
+             topLayerFrame &&
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index b3bf1eeb3..93482ee09 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1284,6 +1284,34 @@ export const updateBoundElementsAfterAutoLayout = (scene: Scene) => {
+ 
+ // --------------------------- Frame Operations -------------------------------
+ 
++let cursorFrameDropTargets: ReadonlyMap<
++  ExcalidrawElement["id"],
++  ExcalidrawFrameLikeElement["id"] | null
++> = new Map();
++
++/**
++ * Records the cursor-approved frame target for the active drag selection.
++ *
++ * Consumers may reconcile frame membership after Excalidraw's pointer-up
++ * callback. Keeping this decision outside React state prevents those consumers
++ * from adding an element by geometry when its cursor never entered the frame.
++ */
++export const setCursorFrameDropTargets = (
++  elements: readonly ExcalidrawElement[],
++  frame: ExcalidrawFrameLikeElement | null,
++) => {
++  cursorFrameDropTargets = new Map(
++    elements.map((element) => [element.id, frame?.id ?? null]),
++  );
++};
++
++const isCursorFrameDropAllowed = (
++  element: ExcalidrawElement,
++  frame: ExcalidrawFrameLikeElement,
++) =>
++  !cursorFrameDropTargets.has(element.id) ||
++  cursorFrameDropTargets.get(element.id) === frame.id;
++
+ /** */
+ export const filterElementsEligibleAsFrameChildren = (
+   elements: readonly ExcalidrawElement[],
+@@ -1320,6 +1348,7 @@ export const filterElementsEligibleAsFrameChildren = (
+         processedGroups.add(shallowestGroupId);
+         const groupElements = getElementsInGroup(elements, shallowestGroupId);
+         if (
++          groupElements.every((el) => isCursorFrameDropAllowed(el, frame)) &&
+           groupElements.some((el) =>
+             elementOverlapsWithFrame(el, frame, elementsMap),
+           )
+@@ -1330,7 +1359,10 @@ export const filterElementsEligibleAsFrameChildren = (
+         }
+       }
+     } else {
+-      if (elementOverlapsWithFrame(element, frame, elementsMap)) {
++      if (
++        isCursorFrameDropAllowed(element, frame) &&
++        elementOverlapsWithFrame(element, frame, elementsMap)
++      ) {
+         eligibleElements.push(element);
+       }
+     }
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 9aa5dd781..3f5fd0780 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -18,6 +18,8 @@ import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+ import {
+   addElementsToFrame,
+   elementOverlapsWithFrame,
++  filterElementsEligibleAsFrameChildren,
++  setCursorFrameDropTargets,
+   shouldApplyFrameClip,
+ } from "../src/frame";
+ 
+@@ -31,6 +33,39 @@ import type {
+ const { h } = window;
+ const mouse = new Pointer("mouse");
+ 
++describe("cursor-based frame drops", () => {
++  it("does not let an overlap reconciliation add a cursor-rejected element", () => {
++    const frame = API.createElement({
++      id: "cursor-drop-frame",
++      type: "frame",
++      x: 100,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const shape = API.createElement({
++      id: "cursor-drop-shape",
++      type: "diamond",
++      x: 50,
++      y: 50,
++      width: 100,
++      height: 100,
++    });
++
++    setCursorFrameDropTargets([shape], null);
++
++    expect(
++      filterElementsEligibleAsFrameChildren([frame, shape], frame),
++    ).toEqual([]);
++
++    setCursorFrameDropTargets([shape], frame);
++
++    expect(
++      filterElementsEligibleAsFrameChildren([frame, shape], frame),
++    ).toEqual([shape]);
++  });
++});
++
+ describe("bound connector frame membership", () => {
+   it("keeps a connector outside when an endpoint remains outside the frame", () => {
+     const frame = API.createElement({
+@@ -812,7 +847,7 @@ describe("adding elements to frames", () => {
+       expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
+     });
+ 
+-    it("should nest a smaller frame as soon as it overlaps the larger frame", () => {
++    it("should not nest a smaller frame while the cursor is outside the larger frame", () => {
+       const largeFrame = API.createElement({
+         id: "largeFrame",
+         type: "frame",
+@@ -841,10 +876,14 @@ describe("adding elements to frames", () => {
+       mouse.moveTo(largeFrame.x + largeFrame.width + 35, largeFrame.y + 40);
+       mouse.up();
+ 
+-      expect(API.getElement(smallFrame).frameId).toBe(largeFrame.id);
++      expect(API.getElement(smallFrame).frameId).toBe(null);
++
++      mouse.clickAt(500, 300);
++
++      expect(API.getElement(smallFrame).frameId).toBe(null);
+     });
+ 
+-    it("should target a frame as soon as a dragged shape overlaps it", () => {
++    it("should target a frame only once the drag cursor enters it", () => {
+       const largeFrame = API.createElement({
+         id: "largeFrame",
+         type: "frame",
+@@ -869,6 +908,10 @@ describe("adding elements to frames", () => {
+       // Only the shape's leading edge enters; the cursor stays outside.
+       mouse.moveTo(largeFrame.x + largeFrame.width + 35, largeFrame.y + 40);
+ 
++      expect(h.state.frameToHighlight).toBe(null);
++
++      mouse.moveTo(largeFrame.x + largeFrame.width - 5, largeFrame.y + 40);
++
+       expect(h.state.frameToHighlight?.id).toBe(largeFrame.id);
+ 
+       mouse.up();
+@@ -876,6 +919,51 @@ describe("adding elements to frames", () => {
+       expect(API.getElement(shape).frameId).toBe(largeFrame.id);
+     });
+ 
++    it("should keep an element above its former frame after dragging it out", () => {
++      const largeFrame = API.createElement({
++        id: "largeFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 150,
++        height: 150,
++      });
++      const shape = API.createElement({
++        id: "shape",
++        type: "rectangle",
++        x: 200,
++        y: 20,
++        width: 80,
++        height: 80,
++      });
++
++      API.setElements([shape, largeFrame]);
++      dragElementIntoFrame(largeFrame, shape);
++
++      const nestedShape = API.getElement(shape);
++      mouse.downAt(
++        nestedShape.x + nestedShape.width / 2,
++        nestedShape.y + nestedShape.height / 2,
++      );
++      mouse.moveTo(largeFrame.x + largeFrame.width + 100, largeFrame.y + 50);
++      mouse.up();
++
++      expect(API.getElement(shape).frameId).toBe(null);
++      expect(h.elements.at(-1)?.id).toBe(shape.id);
++
++      const detachedShape = API.getElement(shape);
++      mouse.downAt(
++        detachedShape.x + detachedShape.width / 2,
++        detachedShape.y + detachedShape.height / 2,
++      );
++      // The shape overlaps the frame, but the cursor remains outside.
++      mouse.moveTo(largeFrame.x + largeFrame.width + 35, largeFrame.y + 50);
++      mouse.up();
++
++      expect(API.getElement(shape).frameId).toBe(null);
++      expect(h.elements.at(-1)?.id).toBe(shape.id);
++    });
++
+     it("should move an element dragged from one frame into another", () => {
+       const otherFrame = API.createElement({
+         id: "otherFrame",
+

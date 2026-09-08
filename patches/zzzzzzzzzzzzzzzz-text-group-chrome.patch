@@ -1,0 +1,315 @@
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index c87ee86..5ba4bbd 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -1040,6 +1040,20 @@ export interface ExcalidrawProps {
+     element: NonDeletedExcalidrawElement,
+     appState: AppState,
+   ) => React.ReactNode;
++  renderTextTop?: (
++    element: NonDeleted<ExcalidrawTextElement>,
++    appState: AppState,
++  ) => React.ReactNode;
++  renderTextLeft?: ExcalidrawProps["renderTextTop"];
++  renderTextRight?: ExcalidrawProps["renderTextTop"];
++  renderTextBottom?: ExcalidrawProps["renderTextTop"];
++  renderGroupTop?: (
++    elements: readonly NonDeletedExcalidrawElement[],
++    appState: AppState,
++  ) => React.ReactNode;
++  renderGroupLeft?: ExcalidrawProps["renderGroupTop"];
++  renderGroupRight?: ExcalidrawProps["renderGroupTop"];
++  renderGroupBottom?: ExcalidrawProps["renderGroupTop"];
+   aiEnabled?: boolean;
+   showDeprecatedFonts?: boolean;
+   hideDefaultRotateHandle?: boolean;
+diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
+index 847dc72..ad78f39 100644
+--- a/packages/excalidraw/index.tsx
++++ b/packages/excalidraw/index.tsx
+@@ -115,6 +115,14 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+     renderShapeTopRight,
+     renderShapeBottomLeft,
+     renderShapeBottomRight,
++    renderTextTop,
++    renderTextLeft,
++    renderTextRight,
++    renderTextBottom,
++    renderGroupTop,
++    renderGroupLeft,
++    renderGroupRight,
++    renderGroupBottom,
+     aiEnabled,
+     showDeprecatedFonts,
+     renderScrollbars,
+@@ -264,6 +272,14 @@ const ExcalidrawBase = (props: ExcalidrawProps) => {
+           renderShapeTopRight={renderShapeTopRight}
+           renderShapeBottomLeft={renderShapeBottomLeft}
+           renderShapeBottomRight={renderShapeBottomRight}
++          renderTextTop={renderTextTop}
++          renderTextLeft={renderTextLeft}
++          renderTextRight={renderTextRight}
++          renderTextBottom={renderTextBottom}
++          renderGroupTop={renderGroupTop}
++          renderGroupLeft={renderGroupLeft}
++          renderGroupRight={renderGroupRight}
++          renderGroupBottom={renderGroupBottom}
+           aiEnabled={aiEnabled !== false}
+           showDeprecatedFonts={showDeprecatedFonts}
+           renderScrollbars={renderScrollbars}
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index af539a0..00823f8 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -315,6 +315,7 @@ import type {
+   SceneElementsMap,
+   NonDeletedSceneElementsMap,
+   ExcalidrawBindableElement,
++  GroupId,
+ } from "@excalidraw/element/types";
+ 
+ import type { ArrowEndpoint } from "@excalidraw/element";
+@@ -2648,6 +2649,7 @@ class App extends React.Component<AppProps, AppState> {
+   private getShapeChromeFrameClipPaths(
+     element: ExcalidrawElement,
+     elementsMap: NonDeletedSceneElementsMap,
++    origin = pointFrom(element.x, element.y),
+   ): string[] {
+     if (!this.state.frameRendering.enabled) {
+       return [];
+@@ -2672,7 +2674,7 @@ class App extends React.Component<AppProps, AppState> {
+         .map((corner) => pointRotateRads(corner, center, frame.angle))
+         .map(
+           ([sceneX, sceneY]) =>
+-            `${sceneX - element.x}px ${sceneY - element.y}px`,
++            `${sceneX - origin[0]}px ${sceneY - origin[1]}px`,
+         );
+       clipPaths.push(`polygon(${points.join(", ")})`);
+     }
+@@ -2680,7 +2682,10 @@ class App extends React.Component<AppProps, AppState> {
+   }
+ 
+   private getShapeChromeOcclusionMask(
+-    element: ExcalidrawElement,
++    element: Pick<
++      ExcalidrawElement,
++      "id" | "x" | "y" | "width" | "height" | "angle"
++    >,
+     elements: readonly NonDeletedExcalidrawElement[],
+     elementIndex: number,
+     elementsMap: NonDeletedSceneElementsMap,
+@@ -3054,6 +3059,206 @@ class App extends React.Component<AppProps, AppState> {
+     });
+   }
+ 
++  private renderTextAndGroupChrome() {
++    const {
++      renderTextTop,
++      renderTextLeft,
++      renderTextRight,
++      renderTextBottom,
++      renderGroupTop,
++      renderGroupLeft,
++      renderGroupRight,
++      renderGroupBottom,
++    } = this.props;
++    if (
++      !renderTextTop &&
++      !renderTextLeft &&
++      !renderTextRight &&
++      !renderTextBottom &&
++      !renderGroupTop &&
++      !renderGroupLeft &&
++      !renderGroupRight &&
++      !renderGroupBottom
++    ) {
++      return null;
++    }
++
++    const elements = this.scene.getNonDeletedElements();
++    const elementsMap = this.scene.getNonDeletedElementsMap();
++    const scale = this.state.zoom.value;
++    const renderChrome = ({
++      key,
++      bounds,
++      angle,
++      elementIndex,
++      frameElement,
++      top,
++      left,
++      right,
++      bottom,
++    }: {
++      key: string;
++      bounds: readonly [number, number, number, number];
++      angle: Radians;
++      elementIndex: number;
++      frameElement: NonDeletedExcalidrawElement;
++      top: React.ReactNode;
++      left: React.ReactNode;
++      right: React.ReactNode;
++      bottom: React.ReactNode;
++    }) => {
++      if (
++        [top, left, right, bottom].every(
++          (node) => node == null || node === false,
++        )
++      ) {
++        return null;
++      }
++      const [x1, y1, x2, y2] = bounds;
++      const geometry = {
++        id: key,
++        x: x1,
++        y: y1,
++        width: x2 - x1,
++        height: y2 - y1,
++        angle,
++      };
++      const mask = this.getShapeChromeOcclusionMask(
++        geometry,
++        elements,
++        elementIndex,
++        elementsMap,
++      );
++      const viewport = sceneCoordsToViewportCoords(
++        { sceneX: x1, sceneY: y1 },
++        this.state,
++      );
++      const slotStyle: React.CSSProperties = {
++        position: "absolute",
++        display: "flex",
++        alignItems: "center",
++        justifyContent: "center",
++        pointerEvents: POINTER_EVENTS.enabled,
++      };
++      const inner = (
++        <div
++          style={{
++            position: "relative",
++            width: geometry.width,
++            height: geometry.height,
++            transform: `rotate(${angle}rad)`,
++            overflow: "hidden",
++            mask: mask ? `url(#${mask.id})` : undefined,
++            WebkitMask: mask ? `url(#${mask.id})` : undefined,
++          }}
++        >
++          {top != null && top !== false && (
++            <div style={{ ...slotStyle, top: 0, left: 0, right: 0 }}>{top}</div>
++          )}
++          {left != null && left !== false && (
++            <div style={{ ...slotStyle, top: 0, left: 0, bottom: 0 }}>
++              {left}
++            </div>
++          )}
++          {right != null && right !== false && (
++            <div style={{ ...slotStyle, top: 0, right: 0, bottom: 0 }}>
++              {right}
++            </div>
++          )}
++          {bottom != null && bottom !== false && (
++            <div style={{ ...slotStyle, left: 0, right: 0, bottom: 0 }}>
++              {bottom}
++            </div>
++          )}
++        </div>
++      );
++      const clipped = this.getShapeChromeFrameClipPaths(
++        frameElement,
++        elementsMap,
++        pointFrom(x1, y1),
++      ).reduce(
++        (child, clipPath) => (
++          <div style={{ clipPath, position: "relative" }}>{child}</div>
++        ),
++        inner,
++      );
++      return (
++        <div
++          key={key}
++          className={CLASSES.SHAPE_CHROME}
++          style={{
++            position: "absolute",
++            transform: `translate(${viewport.x - this.state.offsetLeft}px, ${
++              viewport.y - this.state.offsetTop
++            }px) scale(${scale})`,
++            transformOrigin: "top left",
++            pointerEvents: POINTER_EVENTS.disabled,
++            zIndex: 3,
++          }}
++        >
++          {mask?.definition}
++          {clipped}
++        </div>
++      );
++    };
++
++    const chrome: React.ReactNode[] = [];
++    elements.forEach((element, index) => {
++      if (element.type !== "text" || isElementHidden(element, elementsMap)) {
++        return;
++      }
++      chrome.push(
++        renderChrome({
++          key: `text-chrome-${element.id}`,
++          bounds: [
++            element.x,
++            element.y,
++            element.x + element.width,
++            element.y + element.height,
++          ],
++          angle: element.angle,
++          elementIndex: index,
++          frameElement: element,
++          top: renderTextTop?.(element, this.state),
++          left: renderTextLeft?.(element, this.state),
++          right: renderTextRight?.(element, this.state),
++          bottom: renderTextBottom?.(element, this.state),
++        }),
++      );
++    });
++
++    const groups = new Map<GroupId, Array<typeof elements[number]>>();
++    elements.forEach((element) => {
++      if (isElementHidden(element, elementsMap)) {
++        return;
++      }
++      element.groupIds.forEach((groupId) => {
++        const group = groups.get(groupId) || [];
++        group.push(element);
++        groups.set(groupId, group);
++      });
++    });
++    groups.forEach((groupElements, groupId) => {
++      const topmost = groupElements.reduce((top, element) =>
++        elements.indexOf(element) > elements.indexOf(top) ? element : top,
++      );
++      chrome.push(
++        renderChrome({
++          key: `group-chrome-${groupId}`,
++          bounds: getCommonBounds(groupElements),
++          angle: 0 as Radians,
++          elementIndex: elements.indexOf(topmost),
++          frameElement: topmost,
++          top: renderGroupTop?.(groupElements, this.state),
++          left: renderGroupLeft?.(groupElements, this.state),
++          right: renderGroupRight?.(groupElements, this.state),
++          bottom: renderGroupBottom?.(groupElements, this.state),
++        }),
++      );
++    });
++    return chrome;
++  }
++
+   private toggleOverscrollBehavior = (event: React.PointerEvent) => {
+     // when pointer inside editor, disable overscroll behavior to prevent
+     // panning to trigger history back/forward on MacOS Chrome
+@@ -3444,6 +3649,7 @@ class App extends React.Component<AppProps, AppState> {
+                             )}
+                           {this.renderFrameNames()}
+                           {this.renderShapeChrome()}
++                          {this.renderTextAndGroupChrome()}
+                           {this.isDefaultUIEnabled() &&
+                             this.state.activeLockedId && (
+                               <UnlockPopup

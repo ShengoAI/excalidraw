@@ -1,0 +1,195 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2677,6 +2677,151 @@
+       clipPaths.push(`polygon(${points.join(", ")})`);
+     }
+     return clipPaths;
++  }
++
++  private getShapeChromeOcclusionMask(
++    element: ExcalidrawElement,
++    elements: readonly NonDeletedExcalidrawElement[],
++    elementIndex: number,
++    elementsMap: NonDeletedSceneElementsMap,
++  ) {
++    const occludingElements = elements
++      .slice(elementIndex + 1)
++      .filter(
++        (candidate) =>
++          !isElementHidden(candidate, elementsMap) &&
++          candidate.opacity > 0 &&
++          !isTransparent(candidate.backgroundColor) &&
++          (candidate.type === "rectangle" ||
++            candidate.type === "diamond" ||
++            candidate.type === "ellipse" ||
++            (this.state.frameRendering.enabled &&
++              isFrameLikeElement(candidate))),
++      );
++
++    if (occludingElements.length === 0) {
++      return null;
++    }
++
++    const maskId = `${this.id}-shape-chrome-mask-${element.id}`;
++    const elementCenter = pointFrom(
++      element.x + element.width / 2,
++      element.y + element.height / 2,
++    );
++    const toElementCoords = (sceneX: number, sceneY: number) => {
++      const [rotatedX, rotatedY] = pointRotateRads(
++        pointFrom(sceneX, sceneY),
++        elementCenter,
++        -element.angle as Radians,
++      );
++      return pointFrom(rotatedX - element.x, rotatedY - element.y);
++    };
++
++    return {
++      id: maskId,
++      definition: (
++        <svg
++          aria-hidden="true"
++          width="0"
++          height="0"
++          style={{ position: "absolute" }}
++        >
++          <defs>
++            <mask
++              id={maskId}
++              maskUnits="userSpaceOnUse"
++              maskContentUnits="userSpaceOnUse"
++              x={0}
++              y={0}
++              width={element.width}
++              height={element.height}
++              style={{ maskType: "luminance" }}
++            >
++              <rect
++                x={0}
++                y={0}
++                width={element.width}
++                height={element.height}
++                fill="white"
++              />
++              {occludingElements.map((candidate) => {
++                const center = pointFrom(
++                  candidate.x + candidate.width / 2,
++                  candidate.y + candidate.height / 2,
++                );
++                const fillOpacity = candidate.opacity / 100;
++
++                if (candidate.type === "ellipse") {
++                  const [cx, cy] = toElementCoords(center[0], center[1]);
++                  const relativeAngle = candidate.angle - element.angle;
++                  return (
++                    <ellipse
++                      key={candidate.id}
++                      cx={cx}
++                      cy={cy}
++                      rx={candidate.width / 2}
++                      ry={candidate.height / 2}
++                      fill="black"
++                      fillOpacity={fillOpacity}
++                      transform={`rotate(${
++                        relativeAngle * (180 / Math.PI)
++                      } ${cx} ${cy})`}
++                    />
++                  );
++                }
++
++                const corners = [
++                  pointFrom(candidate.x, candidate.y),
++                  pointFrom(candidate.x + candidate.width, candidate.y),
++                  pointFrom(
++                    candidate.x + candidate.width,
++                    candidate.y + candidate.height,
++                  ),
++                  pointFrom(candidate.x, candidate.y + candidate.height),
++                ].map((corner) => {
++                  const [sceneX, sceneY] = pointRotateRads(
++                    corner,
++                    center,
++                    candidate.angle,
++                  );
++                  return toElementCoords(sceneX, sceneY);
++                });
++                const points =
++                  candidate.type === "diamond"
++                    ? [
++                        pointFrom(
++                          (corners[0][0] + corners[1][0]) / 2,
++                          (corners[0][1] + corners[1][1]) / 2,
++                        ),
++                        pointFrom(
++                          (corners[1][0] + corners[2][0]) / 2,
++                          (corners[1][1] + corners[2][1]) / 2,
++                        ),
++                        pointFrom(
++                          (corners[2][0] + corners[3][0]) / 2,
++                          (corners[2][1] + corners[3][1]) / 2,
++                        ),
++                        pointFrom(
++                          (corners[3][0] + corners[0][0]) / 2,
++                          (corners[3][1] + corners[0][1]) / 2,
++                        ),
++                      ]
++                    : corners;
++
++                return (
++                  <polygon
++                    key={candidate.id}
++                    points={points.map(([x, y]) => `${x},${y}`).join(" ")}
++                    fill="black"
++                    fillOpacity={fillOpacity}
++                  />
++                );
++              })}
++            </mask>
++          </defs>
++        </svg>
++      ),
++    };
+   }
+ 
+   private renderShapeChrome() {
+@@ -2699,7 +2844,8 @@
+ 
+     const scale = this.state.zoom.value;
+     const elementsMap = this.scene.getNonDeletedElementsMap();
+-    return this.scene.getNonDeletedElements().map((element) => {
++    const elements = this.scene.getNonDeletedElements();
++    return elements.map((element, elementIndex) => {
+       if (isElementHidden(element, elementsMap)) {
+         return null;
+       }
+@@ -2760,6 +2906,12 @@
+       const { x, y } = sceneCoordsToViewportCoords(
+         { sceneX: element.x, sceneY: element.y },
+         this.state,
++      );
++      const occlusionMask = this.getShapeChromeOcclusionMask(
++        element,
++        elements,
++        elementIndex,
++        elementsMap,
+       );
+ 
+       const inner = (
+@@ -2771,6 +2923,8 @@
+             height: element.height,
+             transform: `rotate(${element.angle}rad)`,
+             overflow: "hidden",
++            mask: occlusionMask ? `url(#${occlusionMask.id})` : undefined,
++            WebkitMask: occlusionMask ? `url(#${occlusionMask.id})` : undefined,
+           }}
+         >
+           {hasTopLeft && (
+@@ -2893,6 +3047,7 @@
+             zIndex: 3,
+           }}
+         >
++          {occlusionMask?.definition}
+           {clippedInner}
+         </div>
+       );

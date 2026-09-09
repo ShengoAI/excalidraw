@@ -1,0 +1,294 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index 9ff6b4942..74363752c 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -32,11 +32,17 @@ import {
+   boundsContainBounds,
+ } from "./bounds";
+ import { mutateElement } from "./mutateElement";
+-import { updateBoundElements } from "./binding";
++import {
++  bindBindingElementToFixedPoint,
++  unbindBindingElement,
++  updateBoundElements,
++} from "./binding";
+ import { getBoundTextElement, getContainerElement } from "./textElement";
+ import { syncMovedIndices } from "./fractionalIndex";
+ import {
+   isElementHidden,
++  isArrowElement,
++  isBindableElement,
+   isFrameElement,
+   isFrameLikeElement,
+   isLinearElement,
+@@ -51,6 +57,7 @@ import type {
+   ElementsMap,
+   ElementsMapOrArray,
+   ExcalidrawElement,
++  ExcalidrawBindableElement,
+   ExcalidrawFrameLikeElement,
+   FrameAutoLayoutAlign,
+   FrameAutoLayoutHug,
+@@ -1327,6 +1334,131 @@ export const updateBoundElementsAfterAutoLayout = (scene: Scene) => {
+   }
+ };
+ 
++const COLLAPSED_FRAME_BINDINGS_KEY = "shengoCollapsedFrameBindings";
++
++/**
++ * While a frame is collapsed, route connectors from hidden descendants to
++ * the collapsed frame edge. Restores the original descendant binding when
++ * expanding so the relationship remains unchanged.
++ */
++export const updateCollapsedFrameConnectorBindings = (
++  frame: NonDeleted<ExcalidrawFrameLikeElement>,
++  collapsed: boolean,
++  scene: Scene,
++) => {
++  const elementsMap = scene.getNonDeletedElementsMap();
++  const targetsToUpdate = new Map<
++    ExcalidrawElement["id"],
++    NonDeleted<ExcalidrawBindableElement>
++  >();
++
++  for (const element of scene.getNonDeletedElements()) {
++    if (!isArrowElement(element)) {
++      continue;
++    }
++
++    const stored = (element.customData?.[COLLAPSED_FRAME_BINDINGS_KEY] ?? {}) as
++      Record<
++        string,
++        Partial<
++          Record<"start" | "end", NonNullable<typeof element.startBinding>>
++        >
++      >;
++    const frameStored = stored[frame.id] ?? {};
++    let didChange = false;
++
++    for (const end of ["start", "end"] as const) {
++      const field = end === "start" ? "startBinding" : "endBinding";
++      const binding = element[field];
++
++      if (collapsed) {
++        const bindingTarget = binding
++          ? elementsMap.get(binding.elementId)
++          : null;
++        if (
++          !binding ||
++          binding.elementId === frame.id ||
++          !bindingTarget ||
++          !isElementDescendantOfFrame(bindingTarget, frame.id, elementsMap)
++        ) {
++          continue;
++        }
++
++        const oppositeBinding =
++          element[end === "start" ? "endBinding" : "startBinding"];
++        const opposite = oppositeBinding
++          ? elementsMap.get(oppositeBinding.elementId)
++          : null;
++        if (
++          !oppositeBinding ||
++          !opposite ||
++          isElementDescendantOfFrame(opposite, frame.id, elementsMap)
++        ) {
++          continue;
++        }
++
++        const dx = opposite.x + opposite.width / 2 - (frame.x + frame.width / 2);
++        const dy = opposite.y + opposite.height / 2 - (frame.y + frame.height / 2);
++        const scale =
++          0.5 /
++          Math.max(
++            Math.abs(dx) / Math.max(frame.width, 1),
++            Math.abs(dy) / Math.max(frame.height, 1),
++          );
++        const fixedPoint = pointFrom(
++          0.5 + (dx * scale) / Math.max(frame.width, 1),
++          0.5 + (dy * scale) / Math.max(frame.height, 1),
++        );
++
++        unbindBindingElement(element, end, scene);
++        bindBindingElementToFixedPoint(element, frame, end, fixedPoint, scene);
++        frameStored[end] = binding;
++        targetsToUpdate.set(frame.id, frame);
++        didChange = true;
++      } else {
++        const originalBinding = frameStored[end];
++        if (!originalBinding || binding?.elementId !== frame.id) {
++          continue;
++        }
++        const originalTarget = elementsMap.get(originalBinding.elementId);
++        if (!originalTarget || !isBindableElement(originalTarget)) {
++          continue;
++        }
++        unbindBindingElement(element, end, scene);
++        bindBindingElementToFixedPoint(
++          element,
++          originalTarget as NonDeleted<ExcalidrawBindableElement>,
++          end,
++          originalBinding.fixedPoint,
++          scene,
++        );
++        delete frameStored[end];
++        targetsToUpdate.set(originalTarget.id, originalTarget);
++        didChange = true;
++      }
++    }
++
++    if (!didChange) {
++      continue;
++    }
++
++    const nextStored = { ...stored };
++    if (frameStored.start || frameStored.end) {
++      nextStored[frame.id] = frameStored;
++    } else {
++      delete nextStored[frame.id];
++    }
++    scene.mutateElement(element, {
++      customData: {
++        ...element.customData,
++        [COLLAPSED_FRAME_BINDINGS_KEY]: nextStored,
++      },
++    });
++  }
++
++  targetsToUpdate.forEach((target) => updateBoundElements(target, scene));
++};
++
+ // --------------------------- Frame Operations -------------------------------
+ 
+ let cursorFrameDropTargets: ReadonlyMap<
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 5cd8d302f..c3c5f3225 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -184,6 +184,7 @@ import {
+   getCommonFrameId,
+   getFrameChildren,
+   getFrameChildrenForBounds,
++  updateCollapsedFrameConnectorBindings,
+   getFrameChildrenInsertionIndex,
+   isCursorInFrame,
+   addElementsToFrame,
+@@ -6373,6 +6374,7 @@ class App extends React.Component<AppProps, AppState> {
+         expandedHeight: frame.height,
+         height: getCollapsedFrameHeight(frame),
+       });
++      updateCollapsedFrameConnectorBindings(frame, true, this.scene);
+     } else {
+       mutateElement(frame, elementsMap, {
+         collapsed: false,
+@@ -6382,6 +6384,7 @@ class App extends React.Component<AppProps, AppState> {
+         ),
+         expandedHeight: null,
+       });
++      updateCollapsedFrameConnectorBindings(frame, false, this.scene);
+     }
+ 
+     // Height change moves the bindable edge; recompute arrows bound to the frame.
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index bd5f9b17d..07a3e6692 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -14,6 +14,7 @@ import {
+ } from "@excalidraw/excalidraw/tests/test-utils";
+ 
+ import { getSelectedElements } from "@excalidraw/excalidraw/scene";
++import { isArrowElement } from "../src/typeChecks";
+ 
+ import {
+   addElementsToFrame,
+@@ -23,6 +24,7 @@ import {
+   isConnectorCrossingFrameBoundary,
+   setCursorFrameDropTargets,
+   shouldApplyFrameClip,
++  updateCollapsedFrameConnectorBindings,
+ } from "../src/frame";
+ 
+ import type {
+@@ -339,6 +341,82 @@ describe("adding elements to frames", () => {
+     expect(getFrameChildrenForBounds(elements, boundaryFrame.id)).toEqual([]);
+   });
+ 
++  it("routes an external connector through a collapsed frame and restores it", () => {
++    const collapsedFrame = API.createElement({
++      id: "collapsedFrame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 50,
++      collapsed: true,
++      expandedHeight: 200,
++    });
++    const inside = API.createElement({
++      id: "collapsedChild",
++      type: "diamond",
++      x: 50,
++      y: 100,
++      width: 50,
++      height: 50,
++      frameId: collapsedFrame.id,
++      boundElements: [{ id: "collapsedConnector", type: "arrow" }],
++    });
++    const outside = API.createElement({
++      id: "outsideTarget",
++      type: "diamond",
++      x: 400,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "collapsedConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "collapsedConnector",
++      type: "arrow",
++      x: 100,
++      y: 125,
++      points: [pointFrom(0, 0), pointFrom(300, 0)],
++      frameId: collapsedFrame.id,
++      startBinding: {
++        elementId: inside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: outside.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    API.setElements([collapsedFrame, inside, connector, outside]);
++
++    const sceneFrame = h.elements.find(
++      (element) => element.id === collapsedFrame.id,
++    ) as NonDeleted<ExcalidrawFrameLikeElement>;
++    updateCollapsedFrameConnectorBindings(sceneFrame, true, h.scene);
++
++    const collapsedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(
++      collapsedConnector && isArrowElement(collapsedConnector)
++        ? collapsedConnector.startBinding?.elementId
++        : null,
++    ).toBe(collapsedFrame.id);
++
++    updateCollapsedFrameConnectorBindings(sceneFrame, false, h.scene);
++
++    const restoredConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(
++      restoredConnector && isArrowElement(restoredConnector)
++        ? restoredConnector.startBinding?.elementId
++        : null,
++    ).toBe(inside.id);
++  });
++
+   it("should treat an element fully containing a frame as overlapping the frame", () => {
+     const containingRect = API.createElement({
+       type: "rectangle",

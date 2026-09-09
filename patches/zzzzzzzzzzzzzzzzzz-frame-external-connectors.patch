@@ -1,8 +1,8 @@
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
-index 93482ee09..2a026bcf5 100644
+index 93482ee09..9ff6b4942 100644
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -486,6 +486,42 @@ export const getFrameChildren = (
+@@ -486,6 +486,51 @@ export const getFrameChildren = (
    return frameChildren;
  };
  
@@ -16,6 +16,15 @@ index 93482ee09..2a026bcf5 100644
 +    !isElementDescendantOfFrame(element, frameId, elementsMap)
 +  ) {
 +    return false;
++  }
++
++  const frame = elementsMap.get(frameId);
++  if (
++    frame &&
++    isFrameLikeElement(frame) &&
++    !elementsAreInFrameBounds([element], frame, elementsMap)
++  ) {
++    return true;
 +  }
 +
 +  return [element.startBinding, element.endBinding].some((binding) => {
@@ -45,7 +54,7 @@ index 93482ee09..2a026bcf5 100644
  /** Direct children plus nested descendants of a frame. */
  export const getFrameDescendants = (
    allElements: ElementsMapOrArray,
-@@ -1854,6 +1890,12 @@ export const shouldApplyFrameClip = (
+@@ -1854,6 +1899,12 @@ export const shouldApplyFrameClip = (
      return false;
    }
  
@@ -59,7 +68,7 @@ index 93482ee09..2a026bcf5 100644
    // While dragging a child out (and not the frame itself), unclip once it no
    // longer overlaps so the user can see it leave.
 diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
-index ecb8105bc..ea4c9242a 100644
+index 6b0c36114..5cd8d302f 100644
 --- a/packages/excalidraw/components/App.tsx
 +++ b/packages/excalidraw/components/App.tsx
 @@ -183,6 +183,7 @@ import {
@@ -110,7 +119,7 @@ index 356219207..376e17e01 100644
        selectedElement.id,
      );
 diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
-index 3f5fd0780..b24df38b9 100644
+index 8056bde2e..bd5f9b17d 100644
 --- a/packages/element/tests/frame.test.tsx
 +++ b/packages/element/tests/frame.test.tsx
 @@ -19,6 +19,8 @@ import {
@@ -122,7 +131,7 @@ index 3f5fd0780..b24df38b9 100644
    setCursorFrameDropTargets,
    shouldApplyFrameClip,
  } from "../src/frame";
-@@ -230,6 +232,73 @@ describe("adding elements to frames", () => {
+@@ -230,6 +232,113 @@ describe("adding elements to frames", () => {
      });
    });
  
@@ -193,7 +202,46 @@ index 3f5fd0780..b24df38b9 100644
 +    ]);
 +  });
 +
++  it("does not clip an unbound connector while it crosses its frame boundary", () => {
++    const boundaryFrame = API.createElement({
++      id: "drawingFrame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const connector = API.createElement({
++      id: "drawingConnector",
++      type: "line",
++      x: 100,
++      y: 100,
++      points: [pointFrom(0, 0), pointFrom(180, 0)],
++      frameId: boundaryFrame.id,
++      startBinding: null,
++      endBinding: null,
++    });
++    const elements = [boundaryFrame, connector];
++    const elementsMap = arrayToMap(elements);
++
++    expect(
++      isConnectorCrossingFrameBoundary(
++        connector,
++        boundaryFrame.id,
++        elementsMap,
++      ),
++    ).toBe(true);
++    expect(
++      shouldApplyFrameClip(
++        connector,
++        boundaryFrame,
++        h.state,
++        elementsMap,
++      ),
++    ).toBe(false);
++    expect(getFrameChildrenForBounds(elements, boundaryFrame.id)).toEqual([]);
++  });
++
    it("should treat an element fully containing a frame as overlapping the frame", () => {
      const containingRect = API.createElement({
        type: "rectangle",
-

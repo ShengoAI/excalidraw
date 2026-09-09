@@ -1,0 +1,199 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index 93482ee09..2a026bcf5 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -486,6 +486,42 @@ export const getFrameChildren = (
+   return frameChildren;
+ };
+ 
++export const isConnectorCrossingFrameBoundary = (
++  element: ExcalidrawElement,
++  frameId: ExcalidrawFrameLikeElement["id"],
++  elementsMap: ElementsMap,
++) => {
++  if (
++    !isLinearElement(element) ||
++    !isElementDescendantOfFrame(element, frameId, elementsMap)
++  ) {
++    return false;
++  }
++
++  return [element.startBinding, element.endBinding].some((binding) => {
++    if (!binding) {
++      return false;
++    }
++    const boundElement = elementsMap.get(binding.elementId);
++    return (
++      !boundElement ||
++      !isElementDescendantOfFrame(boundElement, frameId, elementsMap)
++    );
++  });
++};
++
++/** Frame children whose geometry should participate in resize-to-fit. */
++export const getFrameChildrenForBounds = (
++  allElements: ElementsMapOrArray,
++  frameId: ExcalidrawFrameLikeElement["id"],
++) => {
++  const elementsMap = arrayToMap(allElements);
++  return getFrameChildren(allElements, frameId).filter(
++    (element) =>
++      !isConnectorCrossingFrameBoundary(element, frameId, elementsMap),
++  );
++};
++
+ /** Direct children plus nested descendants of a frame. */
+ export const getFrameDescendants = (
+   allElements: ElementsMapOrArray,
+@@ -1854,6 +1890,12 @@ export const shouldApplyFrameClip = (
+     return false;
+   }
+ 
++  // A connector from a nested object to an object outside the frame belongs
++  // to the relationship graph, not to the frame's clipped visual contents.
++  if (isConnectorCrossingFrameBoundary(element, frame.id, elementsMap)) {
++    return false;
++  }
++
+   // Members stay clipped even when they sit fully outside the frame bounds.
+   // While dragging a child out (and not the frame itself), unclip once it no
+   // longer overlaps so the user can see it leave.
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index ecb8105bc..ea4c9242a 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -183,6 +183,7 @@ import {
+   hasBoundingBox,
+   getCommonFrameId,
+   getFrameChildren,
++  getFrameChildrenForBounds,
+   getFrameChildrenInsertionIndex,
+   isCursorInFrame,
+   addElementsToFrame,
+@@ -6172,7 +6173,7 @@ class App extends React.Component<AppProps, AppState> {
+       return false;
+     }
+ 
+-    const childElements = getFrameChildren(
++    const childElements = getFrameChildrenForBounds(
+       getNonDeletedElements(this.scene.getElementsIncludingDeleted()),
+       frameId,
+     );
+diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
+index 356219207..376e17e01 100644
+--- a/packages/excalidraw/actions/actionFrame.ts
++++ b/packages/excalidraw/actions/actionFrame.ts
+@@ -5,6 +5,7 @@ import { isFrameLikeElement } from "@excalidraw/element";
+ import {
+   addElementsToFrame,
+   getFittedFrameGeometry,
++  getFrameChildrenForBounds,
+   removeAllElementsFromFrame,
+ } from "@excalidraw/element";
+ import { getFrameChildren } from "@excalidraw/element";
+@@ -185,7 +186,7 @@ export const actionAutoResizeFrame = register({
+     if (!isFrameLikeElement(selectedElement)) {
+       return false;
+     }
+-    const childElements = getFrameChildren(
++    const childElements = getFrameChildrenForBounds(
+       getNonDeletedElements(elements),
+       selectedElement.id,
+     );
+@@ -204,7 +205,7 @@ export const actionAutoResizeFrame = register({
+     }
+ 
+     const elementsMap = app.scene.getNonDeletedElementsMap();
+-    const childElements = getFrameChildren(
++    const childElements = getFrameChildrenForBounds(
+       getNonDeletedElements(elements),
+       selectedElement.id,
+     );
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 3f5fd0780..b24df38b9 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -19,6 +19,8 @@ import {
+   addElementsToFrame,
+   elementOverlapsWithFrame,
+   filterElementsEligibleAsFrameChildren,
++  getFrameChildrenForBounds,
++  isConnectorCrossingFrameBoundary,
+   setCursorFrameDropTargets,
+   shouldApplyFrameClip,
+ } from "../src/frame";
+@@ -230,6 +232,73 @@ describe("adding elements to frames", () => {
+     });
+   });
+ 
++  it("does not clip or fit a connector bound outside its frame", () => {
++    const boundaryFrame = API.createElement({
++      id: "boundaryFrame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 200,
++    });
++    const inside = API.createElement({
++      id: "inside",
++      type: "rectangle",
++      x: 30,
++      y: 50,
++      width: 50,
++      height: 50,
++      frameId: boundaryFrame.id,
++    });
++    const outside = API.createElement({
++      id: "outside",
++      type: "rectangle",
++      x: 300,
++      y: 50,
++      width: 50,
++      height: 50,
++    });
++    const connector = API.createElement({
++      id: "boundaryConnector",
++      type: "arrow",
++      x: 80,
++      y: 75,
++      points: [pointFrom(0, 0), pointFrom(220, 0)],
++      frameId: boundaryFrame.id,
++      startBinding: {
++        elementId: inside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: outside.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    const elements = [boundaryFrame, inside, connector, outside];
++    const elementsMap = arrayToMap(elements);
++
++    expect(
++      isConnectorCrossingFrameBoundary(
++        connector,
++        boundaryFrame.id,
++        elementsMap,
++      ),
++    ).toBe(true);
++    expect(
++      shouldApplyFrameClip(
++        connector,
++        boundaryFrame,
++        h.state,
++        elementsMap,
++      ),
++    ).toBe(false);
++    expect(getFrameChildrenForBounds(elements, boundaryFrame.id)).toEqual([
++      inside,
++    ]);
++  });
++
+   it("should treat an element fully containing a frame as overlapping the frame", () => {
+     const containingRect = API.createElement({
+       type: "rectangle",
+

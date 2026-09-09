@@ -375,4 +375,129 @@ index 9aa5dd781..3f5fd0780 100644
      it("should move an element dragged from one frame into another", () => {
        const otherFrame = API.createElement({
          id: "otherFrame",
-
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index ea4c9242a..62cdb57c8 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -12770,16 +12770,27 @@ class App extends React.Component<AppProps, AppState> {
+             );
+ 
+             if (!frameToHighlight) {
++              const elementsMap =
++                this.scene.getElementsMapIncludingDeleted();
+               const elementsToDetach = selectedElements.filter(
+-                (element) =>
+-                  element.frameId &&
+-                  !this.state.selectedElementIds[element.frameId],
++                (element) => {
++                  if (
++                    !element.frameId ||
++                    this.state.selectedElementIds[element.frameId]
++                  ) {
++                    return false;
++                  }
++                  const currentFrame = elementsMap.get(element.frameId);
++                  return (
++                    !currentFrame ||
++                    !isNonDeletedElement(currentFrame) ||
++                    !isFrameLikeElement(currentFrame) ||
++                    !isCursorInFrame(pointerCoords, currentFrame, elementsMap)
++                  );
++                },
+               );
+               if (elementsToDetach.length > 0) {
+-                removeElementsFromFrame(
+-                  elementsToDetach,
+-                  this.scene.getElementsMapIncludingDeleted(),
+-                );
++                removeElementsFromFrame(elementsToDetach, elementsMap);
+                 this.scene.replaceAllElements(
+                   moveAllRight(
+                     this.scene.getElementsIncludingDeleted(),
+@@ -13799,22 +13810,30 @@ class App extends React.Component<AppProps, AppState> {
+               topLayerFrame,
+             );
+           } else if (!topLayerFrame) {
+-            if (this.state.editingGroupId) {
+-              const elementsToRemove = selectedElements.filter(
+-                (element) =>
+-                  element.frameId &&
+-                  !isElementInFrame(element, nextElements, this.state),
+-              );
++            const elementsOutsideCurrentFrame = selectedElements.filter(
++              (element) => {
++                if (
++                  !element.frameId ||
++                  this.state.selectedElementIds[element.frameId]
++                ) {
++                  return false;
++                }
++                const currentFrame = nextElements.get(element.frameId);
++                return (
++                  !currentFrame ||
++                  !isNonDeletedElement(currentFrame) ||
++                  !isFrameLikeElement(currentFrame) ||
++                  !isCursorInFrame(sceneCoords, currentFrame, nextElements)
++                );
++              },
++            );
+ 
+-              updateGroupIdsAfterEditingGroup(elementsToRemove);
++            if (this.state.editingGroupId) {
++              updateGroupIdsAfterEditingGroup(elementsOutsideCurrentFrame);
+             }
+ 
+             removeElementsFromFrame(
+-              selectedElements.filter(
+-                (element) =>
+-                  element.frameId &&
+-                  !this.state.selectedElementIds[element.frameId],
+-              ),
++              elementsOutsideCurrentFrame,
+               nextElements,
+             );
+           }
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index b24df38b9..9095a082c 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -988,6 +988,39 @@ describe("adding elements to frames", () => {
+       expect(API.getElement(shape).frameId).toBe(largeFrame.id);
+     });
+ 
++    it("should keep a child in its frame when a tiny drag has no drop highlight", () => {
++      const lockedFrame = API.createElement({
++        id: "lockedFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 200,
++        height: 200,
++        locked: true,
++      });
++      const child = API.createElement({
++        id: "child",
++        type: "rectangle",
++        x: 50,
++        y: 50,
++        width: 50,
++        height: 50,
++        frameId: lockedFrame.id,
++      });
++
++      API.setElements([lockedFrame, child]);
++      API.setSelectedElements([child]);
++
++      mouse.downAt(child.x + child.width / 2, child.y + child.height / 2);
++      mouse.moveTo(child.x + child.width / 2 + 1, child.y + child.height / 2);
++
++      expect(h.state.frameToHighlight).toBe(null);
++
++      mouse.up();
++
++      expect(API.getElement(child).frameId).toBe(lockedFrame.id);
++    });
++
+     it("should keep an element above its former frame after dragging it out", () => {
+       const largeFrame = API.createElement({
+         id: "largeFrame",

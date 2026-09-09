@@ -47,12 +47,12 @@ Applied in filename order:
 
 | Patch | Purpose |
 | --- | --- |
+| `arrow-endpoint-detach.patch` | Regression coverage ensuring straight arrow and line endpoints detach when dragged into empty canvas. |
 | `arrow-text-reposition.patch` | Drag arrow labels along the path; `labelPosition` on arrows; bound-text hit testing with threshold. |
 | `bound-text-stroke-color.patch` | Bound text does not inherit a transparent container stroke; stroke-color actions treat bound text separately. |
 | `expose-rotate.patch` | Imperative `rotateSelectedElements`, hide default rotate handle, per-element selection color. |
 | `fonts-local-assets.patch` | Load fonts from same-origin `/fonts` instead of the esm.sh CDN fallback when possible. |
 | `frame-auto-resize.patch` | Frame auto-resize, in-frame title insets, descendant collection, related UI/export/restore. |
-| `preserve-arrow-bindings.patch` | Do not unbind arrow endpoints when a drag finds no hit (keeps existing bindings while editing). |
 | `shape-shadow.patch` | Optional `shadow` on elements; render/restore/API support. |
 | `ui-shape-footer.patch` | Shape chrome/footer slots, reserved footer height, related App/index/types/CSS. |
 | `visibility-hidden.patch` | `isElementHidden` / hidden elements skip hit-testing, search, render, and export as needed. |

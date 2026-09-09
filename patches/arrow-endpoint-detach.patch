@@ -1,0 +1,103 @@
+diff --git a/packages/element/tests/binding.test.tsx b/packages/element/tests/binding.test.tsx
+index ccff66040..b869878dc 100644
+--- a/packages/element/tests/binding.test.tsx
++++ b/packages/element/tests/binding.test.tsx
+@@ -17,6 +17,7 @@ import {
+ import { defaultLang, setLanguage } from "@excalidraw/excalidraw/i18n";
+ 
+ import { bindBindingElement, updateBoundElements } from "../src/binding";
++import { LinearElementEditor } from "../src/linearElementEditor";
+ import { getTransformHandles } from "../src/transformHandles";
+ import {
+   getTextEditor,
+@@ -36,6 +37,89 @@ const { h } = window;
+ const mouse = new Pointer("mouse");
+ 
+ describe("binding for simple arrows", () => {
++  describe.each(["arrow", "line"] as const)(
++    "%s endpoint editing",
++    (type) => {
++      beforeEach(async () => {
++        mouse.reset();
++        await render(<Excalidraw handleKeyboardGlobally={true} />);
++      });
++
++      it("detaches its endpoint into empty canvas", () => {
++        const source = API.createElement({
++          id: `${type}-source`,
++          type: "rectangle",
++          x: 0,
++          y: 0,
++          width: 100,
++          height: 100,
++        });
++        const target = API.createElement({
++          id: `${type}-target`,
++          type: "rectangle",
++          x: 500,
++          y: 0,
++          width: 100,
++          height: 100,
++        });
++        const connector = API.createElement({
++          id: `${type}-connector`,
++          type,
++          x: 100,
++          y: 50,
++          points: [pointFrom(0, 0), pointFrom(400, 0)],
++          startBinding: {
++            elementId: source.id,
++            fixedPoint: [1, 0.5],
++            mode: "orbit",
++          },
++          endBinding: {
++            elementId: target.id,
++            fixedPoint: [0, 0.5],
++            mode: "orbit",
++          },
++        }) as ExcalidrawLinearElement;
++
++        API.setElements([source, target, connector]);
++        mouse.select(connector);
++        Keyboard.withModifierKeys({ ctrl: true }, () => {
++          Keyboard.keyPress(KEYS.ENTER);
++        });
++
++        let elementsMap = arrayToMap(h.elements);
++        let endPoint = LinearElementEditor.getPointAtIndexGlobalCoordinates(
++          connector,
++          -1,
++          elementsMap,
++        );
++        mouse.downAt(endPoint[0], endPoint[1]);
++        mouse.moveTo(300, 250);
++        mouse.up();
++
++        expect(connector.endBinding).toBeNull();
++        endPoint = LinearElementEditor.getPointAtIndexGlobalCoordinates(
++          connector,
++          -1,
++          arrayToMap(h.elements),
++        );
++        expect(endPoint[0]).toBeCloseTo(300);
++        expect(endPoint[1]).toBeCloseTo(250);
++
++        if (type === "arrow") {
++          elementsMap = arrayToMap(h.elements);
++          mouse.downAt(endPoint[0], endPoint[1]);
++          mouse.moveTo(
++            target.x + target.width / 2,
++            target.y + target.height / 2,
++          );
++          mouse.up();
++
++          expect(connector.endBinding?.elementId).toBe(target.id);
++        }
++      });
++    },
++  );
++
+   describe("when both endpoints are bound inside the same element", () => {
+     beforeEach(async () => {
+       mouse.reset();
+

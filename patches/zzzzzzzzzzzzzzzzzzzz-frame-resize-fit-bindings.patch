@@ -1,0 +1,32 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index c3c5f3225..18a2a603e 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -6194,6 +6194,7 @@ class App extends React.Component<AppProps, AppState> {
+         titleFontSize: getFrameNameFontSize(frame),
+       }),
+     );
++    updateBoundElements(frame, this.scene);
+ 
+     this.scene.triggerUpdate();
+     return true;
+diff --git a/packages/excalidraw/actions/actionFrame.ts b/packages/excalidraw/actions/actionFrame.ts
+index 376e17e01..ca4201e7b 100644
+--- a/packages/excalidraw/actions/actionFrame.ts
++++ b/packages/excalidraw/actions/actionFrame.ts
+@@ -13,6 +13,7 @@ import { getFrameChildren } from "@excalidraw/element";
+ import { getElementsInGroup } from "@excalidraw/element";
+ 
+ import { getCommonBounds } from "@excalidraw/element";
++import { updateBoundElements } from "@excalidraw/element";
+ 
+ import { CaptureUpdateAction } from "@excalidraw/element";
+ 
+@@ -234,6 +235,7 @@ export const actionAutoResizeFrame = register({
+         },
+       ),
+     );
++    updateBoundElements(selectedElement, app.scene);
+ 
+     return {
+       elements,

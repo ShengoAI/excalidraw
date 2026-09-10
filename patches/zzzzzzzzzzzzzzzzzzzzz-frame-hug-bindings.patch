@@ -1,0 +1,12 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 18a2a603e..aea1a79b4 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -6296,6 +6296,7 @@ class App extends React.Component<AppProps, AppState> {
+         },
+       );
+       updateBoundElementsAfterAutoLayout(this.scene);
++      updateBoundElements(frame, this.scene);
+     }
+ 
+     if (opts.collapsed !== undefined) {

@@ -1,0 +1,16 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index 74363752c..5afe24bfc 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1328,7 +1328,10 @@ export const updateBoundElementsAfterAutoLayout = (scene: Scene) => {
+ 
+   for (const element of scene.getNonDeletedElements()) {
+     const frame = element.frameId ? elementsMap.get(element.frameId) : null;
+-    if (frame && isFrameLikeElement(frame) && frame.autoLayout) {
++    if (
++      (frame && isFrameLikeElement(frame) && frame.autoLayout) ||
++      (isFrameLikeElement(element) && element.autoLayout)
++    ) {
+       updateBoundElements(element, scene);
+     }
+   }

@@ -1,0 +1,110 @@
+diff --git a/packages/common/src/constants.ts b/packages/common/src/constants.ts
+index c4f588a..68ed782 100644
+--- a/packages/common/src/constants.ts
++++ b/packages/common/src/constants.ts
+@@ -218,6 +218,9 @@ export const FRAME_TITLE_BLOCK_HEIGHT =
+   FRAME_STYLE.nameInsetY +
+   FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight;
+ 
++/** Frame titles wrap to at most two visual lines. */
++export const FRAME_TITLE_MAX_LINES = 2;
++
+ export const SHAPE_FOOTER_PADDING = {
+   top: 16,
+   horizontal: 16,
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index adb3935..3e78e36 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -3,6 +3,7 @@ import {
+   FONT_FAMILY,
+   FRAME_STYLE,
+   FRAME_TITLE_BLOCK_HEIGHT,
++  FRAME_TITLE_MAX_LINES,
+   SHAPE_FOOTER_RESERVED_HEIGHT,
+   SHAPE_TOP_RESERVED_HEIGHT,
+ } from "@excalidraw/common";
+@@ -202,7 +203,9 @@ export const getFrameTitleReservedHeight = (
+ ) => {
+   const titleHeight =
+     FRAME_STYLE.nameInsetY +
+-    getFrameNameFontSize(frame) * FRAME_STYLE.nameLineHeight;
++    getFrameNameFontSize(frame) *
++      FRAME_STYLE.nameLineHeight *
++      FRAME_TITLE_MAX_LINES;
+   return Math.max(titleHeight, SHAPE_TOP_RESERVED_HEIGHT);
+ };
+ 
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index f7ed8f1..1fc37f6 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -21,6 +21,7 @@ import {
+   elementOverlapsWithFrame,
+   filterElementsEligibleAsFrameChildren,
+   getFrameChildrenForBounds,
++  getFrameTitleReservedHeight,
+   isConnectorCrossingFrameBoundary,
+   setCursorFrameDropTargets,
+   shouldApplyFrameClip,
+@@ -37,6 +38,12 @@ import type {
+ const { h } = window;
+ const mouse = new Pointer("mouse");
+ 
++describe("frame title layout", () => {
++  it("reserves two lines for a wrapped large frame title", () => {
++    expect(getFrameTitleReservedHeight({ fontSize: 32 })).toBe(92);
++  });
++});
++
+ describe("cursor-based frame drops", () => {
+   it("does not let an overlap reconciliation add a cursor-rejected element", () => {
+     const frame = API.createElement({
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 6b169fb..5d47d40 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -36,6 +36,7 @@ import {
+   ELEMENT_TRANSLATE_AMOUNT,
+   EVENT,
+   FRAME_STYLE,
++  FRAME_TITLE_MAX_LINES,
+   SHAPE_FOOTER_PADDING,
+   SHAPE_TOP_CONTENT_MIN_HEIGHT,
+   SHAPE_TOP_PADDING,
+@@ -2323,7 +2324,19 @@ class App extends React.Component<AppProps, AppState> {
+           />
+         );
+       } else {
+-        frameNameJSX = <span style={titleWrapStyle}>{frameName}</span>;
++        frameNameJSX = (
++          <span
++            style={{
++              ...titleWrapStyle,
++              display: "-webkit-box",
++              WebkitBoxOrient: "vertical",
++              WebkitLineClamp: FRAME_TITLE_MAX_LINES,
++              overflow: "hidden",
++            }}
++          >
++            {frameName}
++          </span>
++        );
+       }
+ 
+       const frameNameElement = (
+@@ -6403,6 +6416,13 @@ class App extends React.Component<AppProps, AppState> {
+         expandedHeight: null,
+       });
+       updateCollapsedFrameConnectorBindings(frame, false, this.scene);
++      if (frame.autoLayout) {
++        layoutFrameChildren(
++          frame,
++          this.scene.getElementsMapIncludingDeleted(),
++        );
++        updateBoundElementsAfterAutoLayout(this.scene);
++      }
+     }
+ 
+     // Height change moves the bindable edge; recompute arrows bound to the frame.
+

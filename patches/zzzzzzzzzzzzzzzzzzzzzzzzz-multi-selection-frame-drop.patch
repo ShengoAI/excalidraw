@@ -1,0 +1,83 @@
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 1fc37f6..d6612fb 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -1374,6 +1374,49 @@ describe("adding elements to frames", () => {
+       expect(API.getElement(shape).frameId).toBe(largeFrame.id);
+     });
+ 
++    it("should drop the whole dragged selection into the target frame", () => {
++      const targetFrame = API.createElement({
++        id: "selectionTargetFrame",
++        type: "frame",
++        x: 0,
++        y: 0,
++        width: 150,
++        height: 150,
++      });
++      const leadingShape = API.createElement({
++        id: "selectionLeadingShape",
++        type: "rectangle",
++        x: 250,
++        y: 30,
++        width: 40,
++        height: 40,
++      });
++      const trailingShape = API.createElement({
++        id: "selectionTrailingShape",
++        type: "ellipse",
++        x: 450,
++        y: 30,
++        width: 40,
++        height: 40,
++      });
++
++      API.setElements([targetFrame, leadingShape, trailingShape]);
++      API.setSelectedElements([leadingShape, trailingShape]);
++
++      mouse.downAt(
++        leadingShape.x + leadingShape.width / 2,
++        leadingShape.y + leadingShape.height / 2,
++      );
++      mouse.moveTo(
++        targetFrame.x + targetFrame.width / 2,
++        targetFrame.y + targetFrame.height / 2,
++      );
++      mouse.up();
++
++      expect(API.getElement(leadingShape).frameId).toBe(targetFrame.id);
++      expect(API.getElement(trailingShape).frameId).toBe(targetFrame.id);
++    });
++
+     it("should keep a child in its frame when a tiny drag has no drop highlight", () => {
+       const lockedFrame = API.createElement({
+         id: "lockedFrame",
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 5d47d40..27a8cfb 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -198,7 +198,6 @@ import {
+   pickHitWithFrameStacking,
+   shouldApplyFrameClip,
+   elementOverlapsWithFrame,
+-  isElementInFrame,
+   getFrameLikeTitle,
+   getElementsOverlappingFrame,
+   filterElementsEligibleAsFrameChildren,
+@@ -13884,11 +13883,10 @@ class App extends React.Component<AppProps, AppState> {
+             topLayerFrame &&
+             !this.state.selectedElementIds[topLayerFrame.id]
+           ) {
+-            const elementsToAdd = selectedElements.filter((element) =>
+-              isElementInFrame(element, nextElements, this.state, {
+-                targetFrame: topLayerFrame,
+-              }),
+-            );
++            // A drag selection is one drop unit. The cursor-selected target
++            // frame applies to every selected element, even when only part of
++            // the selection geometrically overlaps the frame at pointer-up.
++            const elementsToAdd = selectedElements;
+ 
+             if (this.state.editingGroupId) {
+               updateGroupIdsAfterEditingGroup(elementsToAdd);
+

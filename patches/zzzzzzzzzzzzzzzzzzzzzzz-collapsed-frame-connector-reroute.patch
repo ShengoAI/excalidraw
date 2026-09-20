@@ -1,0 +1,464 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+index 5afe24b..adb3935 100644
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -56,6 +56,7 @@ import type { ExcalidrawElementsIncludingDeleted, Scene } from "./Scene";
+ import type {
+   ElementsMap,
+   ElementsMapOrArray,
++  ExcalidrawArrowElement,
+   ExcalidrawElement,
+   ExcalidrawBindableElement,
+   ExcalidrawFrameLikeElement,
+@@ -1339,6 +1340,13 @@ export const updateBoundElementsAfterAutoLayout = (scene: Scene) => {
+ 
+ const COLLAPSED_FRAME_BINDINGS_KEY = "shengoCollapsedFrameBindings";
+ 
++type CollapsedFrameBindingSnapshot = {
++  originalBinding: NonNullable<ExcalidrawArrowElement["startBinding"]>;
++  proxyFixedPoint: NonNullable<
++    ExcalidrawArrowElement["startBinding"]
++  >["fixedPoint"];
++};
++
+ /**
+  * While a frame is collapsed, route connectors from hidden descendants to
+  * the collapsed frame edge. Restores the original descendant binding when
+@@ -1364,7 +1372,11 @@ export const updateCollapsedFrameConnectorBindings = (
+       Record<
+         string,
+         Partial<
+-          Record<"start" | "end", NonNullable<typeof element.startBinding>>
++          Record<
++            "start" | "end",
++            | NonNullable<typeof element.startBinding>
++            | CollapsedFrameBindingSnapshot
++          >
+         >
+       >;
+     const frameStored = stored[frame.id] ?? {};
+@@ -1415,14 +1427,41 @@ export const updateCollapsedFrameConnectorBindings = (
+ 
+         unbindBindingElement(element, end, scene);
+         bindBindingElementToFixedPoint(element, frame, end, fixedPoint, scene);
+-        frameStored[end] = binding;
++        frameStored[end] = {
++          originalBinding: binding,
++          proxyFixedPoint: fixedPoint,
++        };
+         targetsToUpdate.set(frame.id, frame);
+         didChange = true;
+       } else {
+-        const originalBinding = frameStored[end];
++        const snapshot = frameStored[end];
++        const originalBinding =
++          snapshot && "originalBinding" in snapshot
++            ? snapshot.originalBinding
++            : snapshot;
+         if (!originalBinding || binding?.elementId !== frame.id) {
+           continue;
+         }
++
++        const proxyFixedPoint =
++          snapshot && "originalBinding" in snapshot
++            ? snapshot.proxyFixedPoint
++            : null;
++        const proxyWasMoved =
++          proxyFixedPoint !== null &&
++          (binding.fixedPoint[0] !== proxyFixedPoint[0] ||
++            binding.fixedPoint[1] !== proxyFixedPoint[1]);
++
++        if (proxyWasMoved) {
++          // The user deliberately repositioned the endpoint while collapsed.
++          // Keep that binding on the frame instead of restoring the hidden
++          // descendant. The frame resize pass will place it on the expanded
++          // frame using the newly selected fixed point.
++          delete frameStored[end];
++          targetsToUpdate.set(frame.id, frame);
++          didChange = true;
++          continue;
++        }
+         const originalTarget = elementsMap.get(originalBinding.elementId);
+         if (!originalTarget || !isBindableElement(originalTarget)) {
+           continue;
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+index 07a3e66..f7ed8f1 100644
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -3,7 +3,7 @@ import {
+   Excalidraw,
+ } from "@excalidraw/excalidraw";
+ import { arrayToMap, FRAME_STYLE } from "@excalidraw/common";
+-import { pointFrom } from "@excalidraw/math";
++import { type LocalPoint, pointFrom } from "@excalidraw/math";
+ 
+ import { API } from "@excalidraw/excalidraw/tests/helpers/api";
+ import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
+@@ -14,7 +14,7 @@ import {
+ } from "@excalidraw/excalidraw/tests/test-utils";
+ 
+ import { getSelectedElements } from "@excalidraw/excalidraw/scene";
+-import { isArrowElement } from "../src/typeChecks";
++import { isArrowElement, isFrameLikeElement } from "../src/typeChecks";
+ 
+ import {
+   addElementsToFrame,
+@@ -417,6 +417,267 @@ describe("adding elements to frames", () => {
+     ).toBe(inside.id);
+   });
+ 
++  it("reroutes a connector moved on a collapsed frame when the frame expands", () => {
++    const collapsibleFrame = API.createElement({
++      id: "collapsibleFrame",
++      type: "frame",
++      x: 200,
++      y: 100,
++      width: 200,
++      height: 300,
++      // Reproduce the stale reciprocal state left by an endpoint edit. The
++      // connector binding remains authoritative even if this list is stale.
++      boundElements: [],
++    });
++    const outside = API.createElement({
++      id: "outsideShape",
++      type: "diamond",
++      x: 0,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "frameConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "frameConnector",
++      type: "arrow",
++      elbowed: true,
++      x: 50,
++      y: 125,
++      points: [
++        pointFrom<LocalPoint>(0, 0),
++        pointFrom<LocalPoint>(250, 25),
++      ],
++      startBinding: {
++        elementId: outside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: collapsibleFrame.id,
++        fixedPoint: [0.5, 1],
++        mode: "orbit",
++      },
++    });
++    API.setElements([outside, connector, collapsibleFrame]);
++
++    h.app.setFrameCollapsed(collapsibleFrame.id, true);
++
++    // This is the geometry produced after moving the endpoint to the bottom
++    // edge while the container is collapsed.
++    const collapsedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(collapsedConnector && isArrowElement(collapsedConnector)).toBe(true);
++    if (!collapsedConnector || !isArrowElement(collapsedConnector)) {
++      throw new Error("Expected frame connector");
++    }
++    h.app.scene.mutateElement(collapsedConnector, {
++      points: [
++        pointFrom<LocalPoint>(0, 0),
++        pointFrom<LocalPoint>(250, 25),
++      ],
++      endBinding: {
++        elementId: collapsibleFrame.id,
++        fixedPoint: [0.5, 1],
++        mode: "orbit",
++      },
++    });
++
++    h.app.setFrameCollapsed(collapsibleFrame.id, false);
++
++    const expandedFrame = h.elements.find(
++      (element) => element.id === collapsibleFrame.id,
++    );
++    const expandedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(expandedFrame?.height).toBe(300);
++    expect(expandedConnector && isArrowElement(expandedConnector)).toBe(true);
++    if (
++      !expandedFrame ||
++      !expandedConnector ||
++      !isArrowElement(expandedConnector)
++    ) {
++      throw new Error("Expected expanded frame and connector");
++    }
++    const endPoint = expandedConnector.points.at(-1)!;
++    const globalEndY = expandedConnector.y + endPoint[1];
++    expect(globalEndY).toBeGreaterThanOrEqual(
++      expandedFrame.y + expandedFrame.height,
++    );
++  });
++
++  it("repositions a connector created while the frame is collapsed", () => {
++    const frame = API.createElement({
++      id: "collapsedAtCreationFrame",
++      type: "frame",
++      x: 200,
++      y: 100,
++      width: 200,
++      height: 300,
++      boundElements: [],
++    });
++    API.setElements([frame]);
++    h.app.setFrameCollapsed(frame.id, true);
++
++    const collapsedFrame = h.elements.find(
++      (element) => element.id === frame.id,
++    );
++    if (!collapsedFrame || !isFrameLikeElement(collapsedFrame)) {
++      throw new Error("Expected collapsed frame");
++    }
++
++    const outside = API.createElement({
++      id: "createdWhileCollapsedOutside",
++      type: "diamond",
++      x: 0,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "createdWhileCollapsedConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "createdWhileCollapsedConnector",
++      type: "arrow",
++      elbowed: false,
++      x: 50,
++      y: 125,
++      points: [
++        pointFrom<LocalPoint>(0, 0),
++        pointFrom<LocalPoint>(250, collapsedFrame.height),
++      ],
++      startBinding: {
++        elementId: outside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: collapsedFrame.id,
++        fixedPoint: [0.5, 1],
++        mode: "orbit",
++      },
++    });
++    API.setElements([outside, connector, collapsedFrame]);
++
++    h.app.setFrameCollapsed(frame.id, false);
++
++    const expandedFrame = h.elements.find((element) => element.id === frame.id);
++    const expandedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    if (
++      !expandedFrame ||
++      !expandedConnector ||
++      !isArrowElement(expandedConnector)
++    ) {
++      throw new Error("Expected expanded frame and connector");
++    }
++    const endPoint = expandedConnector.points.at(-1)!;
++    const globalEndX = expandedConnector.x + endPoint[0];
++    const globalEndY = expandedConnector.y + endPoint[1];
++    const distanceToFrameEdge = Math.min(
++      Math.abs(globalEndX - expandedFrame.x),
++      Math.abs(globalEndX - (expandedFrame.x + expandedFrame.width)),
++      Math.abs(globalEndY - expandedFrame.y),
++      Math.abs(globalEndY - (expandedFrame.y + expandedFrame.height)),
++    );
++    // Arrowheads intentionally stop at the configured binding gap.
++    expect(distanceToFrameEdge).toBeLessThanOrEqual(6);
++    expect(globalEndX).toBeGreaterThanOrEqual(expandedFrame.x - 6);
++    expect(globalEndX).toBeLessThanOrEqual(
++      expandedFrame.x + expandedFrame.width + 6,
++    );
++    expect(globalEndY).toBeGreaterThanOrEqual(expandedFrame.y - 6);
++    expect(globalEndY).toBeLessThanOrEqual(
++      expandedFrame.y + expandedFrame.height + 6,
++    );
++  });
++
++  it("keeps a moved collapsed proxy endpoint bound to the expanded frame", () => {
++    const collapsibleFrame = API.createElement({
++      id: "proxyFrame",
++      type: "frame",
++      x: 200,
++      y: 100,
++      width: 200,
++      height: 300,
++    });
++    const inside = API.createElement({
++      id: "proxyChild",
++      type: "diamond",
++      x: 275,
++      y: 200,
++      width: 50,
++      height: 50,
++      frameId: collapsibleFrame.id,
++      boundElements: [{ id: "proxyConnector", type: "arrow" }],
++    });
++    const outside = API.createElement({
++      id: "proxyOutside",
++      type: "diamond",
++      x: 0,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "proxyConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "proxyConnector",
++      type: "arrow",
++      elbowed: true,
++      x: 50,
++      y: 125,
++      points: [pointFrom(0, 0), pointFrom(225, 100)],
++      startBinding: {
++        elementId: outside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: inside.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    API.setElements([outside, connector, inside, collapsibleFrame]);
++
++    h.app.setFrameCollapsed(collapsibleFrame.id, true);
++    const collapsedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(
++      collapsedConnector && isArrowElement(collapsedConnector)
++        ? collapsedConnector.endBinding?.elementId
++        : null,
++    ).toBe(collapsibleFrame.id);
++    if (!collapsedConnector || !isArrowElement(collapsedConnector)) {
++      throw new Error("Expected collapsed proxy connector");
++    }
++
++    h.app.scene.mutateElement(collapsedConnector, {
++      endBinding: {
++        ...collapsedConnector.endBinding!,
++        fixedPoint: [0.5, 1],
++      },
++    });
++    h.app.setFrameCollapsed(collapsibleFrame.id, false);
++
++    const expandedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    expect(
++      expandedConnector && isArrowElement(expandedConnector)
++        ? expandedConnector.endBinding?.elementId
++        : null,
++    ).toBe(collapsibleFrame.id);
++    expect(
++      expandedConnector && isArrowElement(expandedConnector)
++        ? expandedConnector.endBinding?.fixedPoint
++        : null,
++    ).toEqual([0.5, 1]);
++  });
++
+   it("should treat an element fully containing a frame as overlapping the frame", () => {
+     const containingRect = API.createElement({
+       type: "rectangle",
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index aea1a79..6b169fb 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -127,6 +127,7 @@ import {
+   getHoveredElementForBinding,
+   isBindingEnabled,
+   updateBoundElements,
++  updateBoundPoint,
+   LinearElementEditor,
+   newElementWith,
+   newFrameElement,
+@@ -6370,6 +6371,21 @@ class App extends React.Component<AppProps, AppState> {
+       return true;
+     }
+ 
++    // Do not rely on frame.boundElements here. Moving a connector endpoint
++    // while the frame is collapsed can leave that reciprocal list stale even
++    // though the connector's binding still targets the frame.
++    const connectorsToReroute = new Set(
++      this.scene
++        .getNonDeletedElements()
++        .filter(
++          (element) =>
++            isElbowArrow(element) &&
++            (element.startBinding?.elementId === frame.id ||
++              element.endBinding?.elementId === frame.id),
++        )
++        .map((element) => element.id),
++    );
++
+     if (nextCollapsed) {
+       mutateElement(frame, elementsMap, {
+         collapsed: true,
+@@ -6392,6 +6408,55 @@ class App extends React.Component<AppProps, AppState> {
+     // Height change moves the bindable edge; recompute arrows bound to the frame.
+     updateBoundElements(frame, this.scene);
+ 
++    // Recompute from the connector bindings themselves as well. A connector
++    // created or repositioned while collapsed may not be present in the
++    // frame's reciprocal boundElements list, so updateBoundElements() alone
++    // can leave its endpoint at the collapsed geometry.
++    for (const element of this.scene.getNonDeletedElements()) {
++      if (!isArrowElement(element)) {
++        continue;
++      }
++
++      const pointUpdates = new Map();
++      if (element.startBinding?.elementId === frame.id) {
++        const point = updateBoundPoint(
++          element,
++          "startBinding",
++          element.startBinding,
++          frame,
++          this.scene.getNonDeletedElementsMap(),
++        );
++        if (point) {
++          pointUpdates.set(0, { point });
++        }
++      }
++      if (element.endBinding?.elementId === frame.id) {
++        const point = updateBoundPoint(
++          element,
++          "endBinding",
++          element.endBinding,
++          frame,
++          this.scene.getNonDeletedElementsMap(),
++        );
++        if (point) {
++          pointUpdates.set(element.points.length - 1, { point });
++        }
++      }
++      if (pointUpdates.size) {
++        LinearElementEditor.movePoints(element, this.scene, pointUpdates);
++      }
++      if (
++        isElbowArrow(element) &&
++        (element.startBinding?.elementId === frame.id ||
++          element.endBinding?.elementId === frame.id)
++      ) {
++        connectorsToReroute.add(element.id);
++      }
++    }
++    connectorsToReroute.forEach((connectorId) =>
++      this.rerouteElbowArrow(connectorId),
++    );
++
+     this.scene.triggerUpdate();
+     return true;
+   };
+

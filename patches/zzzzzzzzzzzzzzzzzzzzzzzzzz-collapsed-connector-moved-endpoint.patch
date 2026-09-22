@@ -1,0 +1,233 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1348,8 +1348,40 @@
+   proxyFixedPoint: NonNullable<
+     ExcalidrawArrowElement["startBinding"]
+   >["fixedPoint"];
++  collapsedFrame: {
++    x: number;
++    y: number;
++    width: number;
++    height: number;
++  };
+ };
+ 
++/** Side of the collapsed frame the user attached the endpoint to. */
++const fixedPointForCollapsedFrameEndpoint = (
++  endpoint: readonly [number, number],
++  rect: { x: number; y: number; width: number; height: number },
++) => {
++  const width = Math.max(rect.width, 1);
++  const height = Math.max(rect.height, 1);
++  const relX = Math.min(1, Math.max(0, (endpoint[0] - rect.x) / width));
++  const relY = Math.min(1, Math.max(0, (endpoint[1] - rect.y) / height));
++  const distLeft = Math.abs(endpoint[0] - rect.x);
++  const distRight = Math.abs(endpoint[0] - (rect.x + rect.width));
++  const distTop = Math.abs(endpoint[1] - rect.y);
++  const distBottom = Math.abs(endpoint[1] - (rect.y + rect.height));
++  const min = Math.min(distLeft, distRight, distTop, distBottom);
++  if (min === distTop) {
++    return pointFrom(relX, 0);
++  }
++  if (min === distBottom) {
++    return pointFrom(relX, 1);
++  }
++  if (min === distLeft) {
++    return pointFrom(0, relY);
++  }
++  return pointFrom(1, relY);
++};
++
+ /**
+  * While a frame is collapsed, route connectors from hidden descendants to
+  * the collapsed frame edge. Restores the original descendant binding when
+@@ -1433,6 +1465,12 @@
+         frameStored[end] = {
+           originalBinding: binding,
+           proxyFixedPoint: fixedPoint,
++          collapsedFrame: {
++            x: frame.x,
++            y: frame.y,
++            width: frame.width,
++            height: frame.height,
++          },
+         };
+         targetsToUpdate.set(frame.id, frame);
+         didChange = true;
+@@ -1450,16 +1488,59 @@
+           snapshot && "originalBinding" in snapshot
+             ? snapshot.proxyFixedPoint
+             : null;
+-        const proxyWasMoved =
++        const collapsedFrame =
++          snapshot && "collapsedFrame" in snapshot
++            ? snapshot.collapsedFrame
++            : null;
++        const endpointLocal =
++          end === "start"
++            ? element.points[0]
++            : element.points[element.points.length - 1];
++        const endpoint = [
++          element.x + endpointLocal[0],
++          element.y + endpointLocal[1],
++        ] as const;
++        let movedFixedPoint: ReturnType<
++          typeof fixedPointForCollapsedFrameEndpoint
++        > | null = null;
++        if (collapsedFrame && proxyFixedPoint) {
++          const proxyX =
++            collapsedFrame.x + proxyFixedPoint[0] * collapsedFrame.width;
++          const proxyY =
++            collapsedFrame.y + proxyFixedPoint[1] * collapsedFrame.height;
++          // Binding leaves a small gap at the outline. A real move to another
++          // side of the collapsed frame is much larger than that gap.
++          const endpointDistance = Math.hypot(
++            endpoint[0] - proxyX,
++            endpoint[1] - proxyY,
++          );
++          if (endpointDistance > 24) {
++            movedFixedPoint = fixedPointForCollapsedFrameEndpoint(
++              endpoint,
++              collapsedFrame,
++            );
++          }
++        }
++        const fixedPointChanged =
+           proxyFixedPoint !== null &&
+           (binding.fixedPoint[0] !== proxyFixedPoint[0] ||
+             binding.fixedPoint[1] !== proxyFixedPoint[1]);
++        const proxyWasMoved = fixedPointChanged || movedFixedPoint !== null;
+ 
+         if (proxyWasMoved) {
+           // The user deliberately repositioned the endpoint while collapsed.
+           // Keep that binding on the frame instead of restoring the hidden
+-          // descendant. The frame resize pass will place it on the expanded
+-          // frame using the newly selected fixed point.
++          // descendant. Dragging the arrow updates its points even when the
++          // stored fixedPoint is unchanged, so derive the side from where the
++          // endpoint sits on the collapsed frame.
++          if (movedFixedPoint) {
++            scene.mutateElement(element, {
++              [field]: {
++                ...binding,
++                fixedPoint: movedFixedPoint,
++              },
++            });
++          }
+           delete frameStored[end];
+           targetsToUpdate.set(frame.id, frame);
+           didChange = true;
+diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -685,6 +685,109 @@
+     ).toEqual([0.5, 1]);
+   });
+ 
++  it("keeps a connector dragged to the top of a collapsed frame attached after expand", () => {
++    const collapsibleFrame = API.createElement({
++      id: "topProxyFrame",
++      type: "frame",
++      x: 200,
++      y: 100,
++      width: 200,
++      height: 300,
++    });
++    const inside = API.createElement({
++      id: "topProxyChild",
++      type: "diamond",
++      x: 275,
++      y: 200,
++      width: 50,
++      height: 50,
++      frameId: collapsibleFrame.id,
++      boundElements: [{ id: "topProxyConnector", type: "arrow" }],
++    });
++    const outside = API.createElement({
++      id: "topProxyOutside",
++      type: "diamond",
++      x: 0,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "topProxyConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "topProxyConnector",
++      type: "arrow",
++      elbowed: false,
++      x: 50,
++      y: 125,
++      points: [pointFrom(0, 0), pointFrom(225, 100)],
++      startBinding: {
++        elementId: outside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: inside.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    API.setElements([outside, connector, inside, collapsibleFrame]);
++
++    h.app.setFrameCollapsed(collapsibleFrame.id, true);
++    const collapsedFrame = h.elements.find(
++      (element) => element.id === collapsibleFrame.id,
++    );
++    const collapsedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    if (
++      !collapsedFrame ||
++      !collapsedConnector ||
++      !isArrowElement(collapsedConnector) ||
++      !collapsedConnector.endBinding
++    ) {
++      throw new Error("Expected collapsed proxy connector");
++    }
++
++    const topX = collapsedFrame.x + collapsedFrame.width / 2;
++    const topY = collapsedFrame.y;
++    h.app.scene.mutateElement(collapsedConnector, {
++      points: [
++        collapsedConnector.points[0],
++        pointFrom<LocalPoint>(
++          topX - collapsedConnector.x,
++          topY - collapsedConnector.y,
++        ),
++      ],
++    });
++
++    h.app.setFrameCollapsed(collapsibleFrame.id, false);
++
++    const expandedFrame = h.elements.find(
++      (element) => element.id === collapsibleFrame.id,
++    );
++    const expandedConnector = h.elements.find(
++      (element) => element.id === connector.id,
++    );
++    if (
++      !expandedFrame ||
++      !expandedConnector ||
++      !isArrowElement(expandedConnector)
++    ) {
++      throw new Error("Expected expanded connector");
++    }
++    const endPoint = expandedConnector.points.at(-1)!;
++    const globalEndX = expandedConnector.x + endPoint[0];
++    const globalEndY = expandedConnector.y + endPoint[1];
++    expect(expandedConnector.endBinding?.elementId).toBe(collapsibleFrame.id);
++    // Arrowheads stop a binding gap short of the outline.
++    expect(Math.abs(globalEndY - expandedFrame.y)).toBeLessThanOrEqual(12);
++    expect(globalEndX).toBeGreaterThanOrEqual(expandedFrame.x - 8);
++    expect(globalEndX).toBeLessThanOrEqual(
++      expandedFrame.x + expandedFrame.width + 8,
++    );
++  });
++
+   it("should treat an element fully containing a frame as overlapping the frame", () => {
+     const containingRect = API.createElement({
+       type: "rectangle",

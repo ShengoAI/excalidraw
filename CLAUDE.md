@@ -84,6 +84,7 @@ Applied in filename order:
 | `expose-rotate.patch` | Imperative `rotateSelectedElements`, hide default rotate handle, per-element selection color. |
 | `fonts-local-assets.patch` | Load fonts from same-origin `/fonts` instead of the esm.sh CDN fallback when possible. |
 | `frame-auto-resize.patch` | Frame auto-resize, in-frame title insets, descendant collection, related UI/export/restore. |
+| `frame-delete-children.patch` | Deleting a frame also deletes nested elements, including nested frames and bound text. |
 | `preserve-arrow-bindings.patch` | Do not unbind arrow endpoints when a drag finds no hit (keeps existing bindings while editing). |
 | `shape-shadow.patch` | Optional `shadow` on elements; render/restore/API support. |
 | `ui-shape-footer.patch` | Shape chrome/footer slots, reserved footer height, related App/index/types/CSS. |

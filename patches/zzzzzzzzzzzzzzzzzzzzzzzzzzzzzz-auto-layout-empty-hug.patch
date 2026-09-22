@@ -1,0 +1,31 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -755,5 +755,26 @@ export const layoutFrameChildren = (
+   });
+ 
+   if (!items.length) {
+-    return false;
++    const titleHeight = getFrameTitleReservedHeight(frame);
++    const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
++    const nextWidth = hug.horizontal
++      ? padding.horizontal * 2
++      : opts.width ?? frame.width;
++    const nextHeight = hug.vertical
++      ? titleHeight + padding.vertical + bottomReserve
++      : opts.height ?? frame.height;
++
++    if (nextWidth === frame.width && nextHeight === frame.height) {
++      return false;
++    }
++
++    mutateElement(frame, elementsMap, {
++      width: nextWidth,
++      height: nextHeight,
++      autoLayoutPadding: padding,
++      autoLayoutGap: gap,
++      autoLayoutHug: hug,
++      autoLayoutAlign: align,
++    });
++    return true;
+   }

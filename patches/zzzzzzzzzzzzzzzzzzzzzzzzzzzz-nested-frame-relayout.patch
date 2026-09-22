@@ -1,0 +1,57 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -6210,6 +6210,7 @@
+     updateBoundElements(frame, this.scene);
+ 
+     this.scene.triggerUpdate();
++    this.relayoutAncestorFrames(frameId);
+     return true;
+   };
+ 
+@@ -6317,9 +6318,45 @@
+     }
+ 
+     this.scene.triggerUpdate();
++    this.relayoutAncestorFrames(frameId);
+     return true;
+   };
+ 
++  /** A nested frame that hugs its children must also resize every parent frame. */
++  private relayoutAncestorFrames = (frameId: string) => {
++    if (this.isRelayoutingAncestorFrames) {
++      return;
++    }
++    this.isRelayoutingAncestorFrames = true;
++    try {
++      const seen = new Set<string>([frameId]);
++      let currentId: string | null = frameId;
++      while (currentId) {
++        const current = this.scene.getNonDeletedElementsMap().get(currentId);
++        const parentId =
++          current && typeof current.frameId === "string" ? current.frameId : null;
++        if (!parentId || seen.has(parentId)) {
++          break;
++        }
++        seen.add(parentId);
++        const parent = this.scene.getNonDeletedElementsMap().get(parentId);
++        if (!parent || !isFrameLikeElement(parent) || parent.collapsed) {
++          break;
++        }
++        if (!parent.autoLayout) {
++          currentId = parentId;
++          continue;
++        }
++        this.updateFrameLayout(parentId, {});
++        currentId = parentId;
++      }
++    } finally {
++      this.isRelayoutingAncestorFrames = false;
++    }
++  };
++
++  private isRelayoutingAncestorFrames = false;
++
+   public getFrameLayout: ExcalidrawImperativeAPI["getFrameLayout"] = (
+     frameId,
+   ) => {

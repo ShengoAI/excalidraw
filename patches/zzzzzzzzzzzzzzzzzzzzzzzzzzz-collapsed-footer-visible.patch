@@ -1,0 +1,26 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -2906,13 +2906,13 @@
+       const bottomLeft = renderShapeBottomLeft?.(element, this.state);
+       const bottomRight = renderShapeBottomRight?.(element, this.state);
+-      const hideFooter =
++      const collapsedFrame =
+         isFrameLikeElement(element) && Boolean(element.collapsed);
+-      const hasFooter = !hideFooter && footer != null && footer !== false;
++      const hasFooter = footer != null && footer !== false;
+       const hasTopLeft = topLeft != null && topLeft !== false;
+       const hasTopRight = topRight != null && topRight !== false;
+       const hasBottomLeft =
+-        !hideFooter && bottomLeft != null && bottomLeft !== false;
++        !collapsedFrame && bottomLeft != null && bottomLeft !== false;
+       const hasBottomRight =
+-        !hideFooter && bottomRight != null && bottomRight !== false;
++        !collapsedFrame && bottomRight != null && bottomRight !== false;
+       if (
+         !hasFooter &&
+         !hasTopLeft &&
+         !hasTopRight &&
+         !hasBottomLeft &&
+         !hasBottomRight
+       ) {

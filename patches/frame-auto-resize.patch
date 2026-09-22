@@ -264,7 +264,7 @@ index bc2cdf285..8d7f754b5 100644
 +
 +export const getCollapsedFrameHeight = (
 +  frame?: Pick<ExcalidrawFrameLikeElement, "fontSize"> | null,
-+) => getFrameTitleReservedHeight(frame);
++) => getFrameTitleReservedHeight(frame) + SHAPE_FOOTER_RESERVED_HEIGHT;
 +
 +export const getFittedFrameGeometry = (
 +  childBounds: readonly [number, number, number, number],

@@ -1,0 +1,289 @@
+--- a/packages/element/src/dragElements.ts
++++ b/packages/element/src/dragElements.ts
+@@ -166,6 +166,25 @@
+   const elementsToUpdateIds = new Set(
+     Array.from(elementsToUpdate, (el) => el.id),
+   );
++  const directlySelectedIds = new Set(selectedElements.map((el) => el.id));
++  // A connector that only moves because its frame moved, and that is bound to
++  // something outside the moving set, must keep both bindings. Translating it
++  // with the frame unbinds the outside end and the line leaves both children.
++  const arrowFollowsBoundShapes = (element: NonDeletedExcalidrawElement) => {
++    if (!isArrowElement(element) || directlySelectedIds.has(element.id)) {
++      return false;
++    }
++    const startOutside =
++      !!element.startBinding &&
++      !elementsToUpdateIds.has(element.startBinding.elementId);
++    const endOutside =
++      !!element.endBinding &&
++      !elementsToUpdateIds.has(element.endBinding.elementId);
++    return startOutside || endOutside;
++  };
++  const simultaneouslyUpdated = Array.from(elementsToUpdate).filter(
++    (element) => !arrowFollowsBoundShapes(element),
++  );
+ 
+   elementsToUpdate.forEach((element) => {
+     const isArrow = !isArrowElement(element);
+@@ -197,8 +216,10 @@
+         );
+       }
+       updateBoundElements(element, scene, {
+-        simultaneouslyUpdated: Array.from(elementsToUpdate),
++        simultaneouslyUpdated,
+       });
++    } else if (arrowFollowsBoundShapes(element)) {
++      return;
+     } else if (
+       // NOTE: Add a little initial drag to the arrow dragging when the arrow
+       // is the single element being dragged to avoid accidentally unbinding
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1521,47 +1521,46 @@
+           element.x + endpointLocal[0],
+           element.y + endpointLocal[1],
+         ] as const;
+-        let movedFixedPoint: ReturnType<
+-          typeof fixedPointForCollapsedFrameEndpoint
+-        > | null = null;
+-        if (collapsedFrame && proxyFixedPoint) {
+-          const proxyX =
+-            collapsedFrame.x + proxyFixedPoint[0] * collapsedFrame.width;
+-          const proxyY =
+-            collapsedFrame.y + proxyFixedPoint[1] * collapsedFrame.height;
+-          // Binding leaves a small gap at the outline. A real move to another
+-          // side of the collapsed frame is much larger than that gap.
+-          const endpointDistance = Math.hypot(
+-            endpoint[0] - proxyX,
+-            endpoint[1] - proxyY,
+-          );
+-          if (endpointDistance > 24) {
+-            movedFixedPoint = fixedPointForCollapsedFrameEndpoint(
+-              endpoint,
+-              collapsedFrame,
+-            );
+-          }
+-        }
+-        const fixedPointChanged =
++        // Moving the collapsed frame carries the proxy endpoint with it.
++        // That is not a user edit of the relationship. Only an endpoint that
++        // lands on a different side of the frame should stay on the frame.
++        const currentSide = fixedPointForCollapsedFrameEndpoint(endpoint, {
++          x: frame.x,
++          y: frame.y,
++          width: frame.width,
++          height: frame.height,
++        });
++        const sameEdge =
+           proxyFixedPoint !== null &&
+-          (binding.fixedPoint[0] !== proxyFixedPoint[0] ||
+-            binding.fixedPoint[1] !== proxyFixedPoint[1]);
+-        const proxyWasMoved = fixedPointChanged || movedFixedPoint !== null;
++          ((proxyFixedPoint[0] === 0 && currentSide[0] === 0) ||
++            (proxyFixedPoint[0] === 1 && currentSide[0] === 1) ||
++            (proxyFixedPoint[1] === 0 && currentSide[1] === 0) ||
++            (proxyFixedPoint[1] === 1 && currentSide[1] === 1));
++        let followedFrame = false;
++        if (collapsedFrame && proxyFixedPoint) {
++          const frameDx = frame.x - collapsedFrame.x;
++          const frameDy = frame.y - collapsedFrame.y;
++          const expectedX =
++            collapsedFrame.x +
++            proxyFixedPoint[0] * collapsedFrame.width +
++            frameDx;
++          const expectedY =
++            collapsedFrame.y +
++            proxyFixedPoint[1] * collapsedFrame.height +
++            frameDy;
++          followedFrame =
++            Math.hypot(endpoint[0] - expectedX, endpoint[1] - expectedY) <=
++            24;
++        }
++        const userMovedEndpoint = !sameEdge && !followedFrame;
+ 
+-        if (proxyWasMoved) {
+-          // The user deliberately repositioned the endpoint while collapsed.
+-          // Keep that binding on the frame instead of restoring the hidden
+-          // descendant. Dragging the arrow updates its points even when the
+-          // stored fixedPoint is unchanged, so derive the side from where the
+-          // endpoint sits on the collapsed frame.
+-          if (movedFixedPoint) {
+-            scene.mutateElement(element, {
+-              [field]: {
+-                ...binding,
+-                fixedPoint: movedFixedPoint,
+-              },
+-            });
+-          }
++        if (userMovedEndpoint) {
++          scene.mutateElement(element, {
++            [field]: {
++              ...binding,
++              fixedPoint: currentSide,
++            },
++          });
+           delete frameStored[end];
+           targetsToUpdate.set(frame.id, frame);
+           didChange = true;
+--- a/packages/element/tests/frame.test.tsx
++++ b/packages/element/tests/frame.test.tsx
+@@ -785,7 +785,101 @@
+     expect(globalEndX).toBeGreaterThanOrEqual(expandedFrame.x - 8);
+     expect(globalEndX).toBeLessThanOrEqual(
+       expandedFrame.x + expandedFrame.width + 8,
++    );
++  });
++
++  it("restores a child binding after the collapsed frame is moved", () => {
++    const leftFrame = API.createElement({
++      id: "leftFrame",
++      type: "frame",
++      x: 0,
++      y: 0,
++      width: 200,
++      height: 160,
++    });
++    const leftChild = API.createElement({
++      id: "leftChild",
++      type: "rectangle",
++      x: 40,
++      y: 40,
++      width: 80,
++      height: 50,
++      frameId: leftFrame.id,
++      boundElements: [{ id: "crossConnector", type: "arrow" }],
++    });
++    const rightFrame = API.createElement({
++      id: "rightFrame",
++      type: "frame",
++      x: 400,
++      y: 0,
++      width: 200,
++      height: 160,
++    });
++    const rightChild = API.createElement({
++      id: "rightChild",
++      type: "rectangle",
++      x: 440,
++      y: 40,
++      width: 80,
++      height: 50,
++      frameId: rightFrame.id,
++      boundElements: [{ id: "crossConnector", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "crossConnector",
++      type: "arrow",
++      elbowed: false,
++      x: 120,
++      y: 65,
++      points: [pointFrom(0, 0), pointFrom(320, 0)],
++      startBinding: {
++        elementId: leftChild.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: rightChild.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    API.setElements([leftFrame, leftChild, connector, rightFrame, rightChild]);
++
++    h.app.setFrameCollapsed(rightFrame.id, true);
++    const collapsedFrame = h.elements.find((element) => element.id === rightFrame.id);
++    const collapsedChild = h.elements.find((element) => element.id === rightChild.id);
++    const collapsedConnector = h.elements.find(
++      (element) => element.id === connector.id,
+     );
++    if (
++      !collapsedFrame ||
++      !collapsedChild ||
++      !collapsedConnector ||
++      !isArrowElement(collapsedConnector)
++    ) {
++      throw new Error("Expected collapsed cross-frame connector");
++    }
++
++    const dx = -180;
++    const dy = 40;
++    h.app.scene.mutateElement(collapsedFrame, {
++      x: collapsedFrame.x + dx,
++      y: collapsedFrame.y + dy,
++    });
++    h.app.scene.mutateElement(collapsedChild, {
++      x: collapsedChild.x + dx,
++      y: collapsedChild.y + dy,
++    });
++    h.app.scene.mutateElement(collapsedConnector, {
++      x: collapsedConnector.x + dx,
++      y: collapsedConnector.y + dy,
++    });
++
++    h.app.setFrameCollapsed(rightFrame.id, false);
++    const restored = h.elements.find((element) => element.id === connector.id);
++    expect(
++      restored && isArrowElement(restored) ? restored.endBinding?.elementId : null,
++    ).toBe(rightChild.id);
+   });
+ 
+   it("should treat an element fully containing a frame as overlapping the frame", () => {
+--- a/packages/element/src/binding.ts
++++ b/packages/element/src/binding.ts
+@@ -1298,12 +1298,49 @@
+       (update): update is MapEntry<PointsPositionUpdates> => update !== null,
+     );
+ 
+-    LinearElementEditor.movePoints(element, scene, new Map(updates), {
+-      moveMidPointsWithElement:
+-        !!startBindingElement &&
+-        startBindingElement?.id === endBindingElement?.id,
+-    });
++    // A moved shape reroutes its elbow arrow from the stored fixed point.
++    // That point is often the center, so when the drag ends the line jumps
++    // through the children. Re-anchor both ends to the outline first.
++    const bindingUpdates: {
++      startBinding?: FixedPointBinding;
++      endBinding?: FixedPointBinding;
++    } = {};
++    if (isElbowArrow(element)) {
++      for (const end of ["start", "end"] as const) {
++        const field = end === "start" ? "startBinding" : "endBinding";
++        const binding = element[field];
++        if (!binding) {
++          continue;
++        }
++        const target = elementsMap.get(binding.elementId);
++        if (!target || !isBindableElement(target) || target.isDeleted) {
++          continue;
++        }
++        const { fixedPoint } = calculateFixedPointForElbowArrowBinding(
++          element,
++          target,
++          end,
++          elementsMap,
++        );
++        bindingUpdates[field] = {
++          ...binding,
++          fixedPoint,
++        };
++      }
++    }
+ 
++    LinearElementEditor.movePoints(
++      element,
++      scene,
++      new Map(updates),
++      {
++        moveMidPointsWithElement:
++          !!startBindingElement &&
++          startBindingElement?.id === endBindingElement?.id,
++        ...bindingUpdates,
++      },
++    );
++
+     const boundText = getBoundTextElement(element, elementsMap);
+     if (boundText && !boundText.isDeleted) {
+       handleBindTextResize(element, scene, false);

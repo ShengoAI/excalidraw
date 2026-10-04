@@ -1,0 +1,59 @@
+diff --git a/packages/element/src/textMeasurements.ts b/packages/element/src/textMeasurements.ts
+index 5e790261d..1a0584703 100644
+--- a/packages/element/src/textMeasurements.ts
++++ b/packages/element/src/textMeasurements.ts
+@@ -20,7 +20,11 @@ export const measureText = (
+     // lines would be stripped from computation
+     .map((x) => x || " ")
+     .join("\n");
+-  const fontSize = parseFloat(font);
++  // CSS font shorthand may start with style and weight (e.g. "italic 700").
++  // Read the size token instead of mistaking the weight for the font size.
++  const fontSize = parseFloat(
++    font.match(/(?:^|\s)(\d+(?:\.\d+)?)px(?=\s|$)/)?.[1] ?? font,
++  );
+   const height = getTextHeight(_text, fontSize, lineHeight);
+   const width = getTextWidth(_text, font);
+   return { width, height };
+diff --git a/packages/element/tests/textElement.test.ts b/packages/element/tests/textElement.test.ts
+index 986854b98..9603ddbfc 100644
+--- a/packages/element/tests/textElement.test.ts
++++ b/packages/element/tests/textElement.test.ts
+@@ -1,4 +1,4 @@
+-import { getLineHeight } from "@excalidraw/common";
++import { getFontString, getLineHeight } from "@excalidraw/common";
+ import { API } from "@excalidraw/excalidraw/tests/helpers/api";
+ 
+ import { FONT_FAMILY, TEXT_ALIGN, VERTICAL_ALIGN } from "@excalidraw/common";
+@@ -10,11 +10,30 @@ import {
+   getBoundTextMaxHeight,
+   computeBoundTextPosition,
+ } from "../src/textElement";
+-import { detectLineHeight, getLineHeightInPx } from "../src/textMeasurements";
++import {
++  detectLineHeight,
++  getLineHeightInPx,
++  measureText,
++} from "../src/textMeasurements";
+ 
+ import type { ExcalidrawTextElementWithContainer } from "../src/types";
+ 
+ describe("Test measureText", () => {
++  it("uses the font size instead of the weight for styled bound text", () => {
++    for (const customData of [
++      { shengoTextBold: true },
++      { shengoTextItalic: true },
++      { shengoTextBold: true, shengoTextItalic: true },
++    ]) {
++      const font = getFontString({
++        fontSize: 20,
++        fontFamily: FONT_FAMILY.Excalifont,
++        customData,
++      });
++      expect(measureText("Shape text", font, 1.25).height).toBe(25);
++    }
++  });
++
+   describe("Test getContainerCoords", () => {
+     const params = { width: 200, height: 100, x: 10, y: 20 };
+ 

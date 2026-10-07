@@ -55,7 +55,7 @@ diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
          };
          targetsToUpdate.set(frame.id, frame);
          didChange = true;
-@@ -1450,16 +1488,59 @@
+@@ -1450,16 +1488,69 @@
            snapshot && "originalBinding" in snapshot
              ? snapshot.proxyFixedPoint
              : null;
@@ -76,10 +76,20 @@ diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
 +          typeof fixedPointForCollapsedFrameEndpoint
 +        > | null = null;
 +        if (collapsedFrame && proxyFixedPoint) {
++          // The frame may have moved while collapsed. Compare in its current
++          // position, but retain the collapsed height after expansion.
++          const currentCollapsedFrame = {
++            ...collapsedFrame,
++            x: frame.x,
++            y: frame.y,
++            width: frame.width,
++          };
 +          const proxyX =
-+            collapsedFrame.x + proxyFixedPoint[0] * collapsedFrame.width;
++            currentCollapsedFrame.x +
++            proxyFixedPoint[0] * currentCollapsedFrame.width;
 +          const proxyY =
-+            collapsedFrame.y + proxyFixedPoint[1] * collapsedFrame.height;
++            currentCollapsedFrame.y +
++            proxyFixedPoint[1] * currentCollapsedFrame.height;
 +          // Binding leaves a small gap at the outline. A real move to another
 +          // side of the collapsed frame is much larger than that gap.
 +          const endpointDistance = Math.hypot(
@@ -89,7 +99,7 @@ diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
 +          if (endpointDistance > 24) {
 +            movedFixedPoint = fixedPointForCollapsedFrameEndpoint(
 +              endpoint,
-+              collapsedFrame,
++              currentCollapsedFrame,
 +            );
 +          }
 +        }
@@ -121,7 +131,7 @@ diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
 diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/frame.test.tsx
 --- a/packages/element/tests/frame.test.tsx
 +++ b/packages/element/tests/frame.test.tsx
-@@ -685,6 +685,109 @@
+@@ -685,6 +685,180 @@
      ).toEqual([0.5, 1]);
    });
  
@@ -226,6 +236,77 @@ diff --git a/packages/element/tests/frame.test.tsx b/packages/element/tests/fram
 +    expect(globalEndX).toBeLessThanOrEqual(
 +      expandedFrame.x + expandedFrame.width + 8,
 +    );
++  });
++
++  it("restores a child connector after moving its collapsed frame", () => {
++    const frame = API.createElement({
++      id: "movedCollapsedFrame",
++      type: "frame",
++      x: 200,
++      y: 100,
++      width: 200,
++      height: 300,
++    });
++    const child = API.createElement({
++      id: "movedCollapsedChild",
++      type: "diamond",
++      x: 275,
++      y: 200,
++      width: 50,
++      height: 50,
++      frameId: frame.id,
++      boundElements: [{ id: "movedCollapsedArrow", type: "arrow" }],
++    });
++    const outside = API.createElement({
++      id: "movedCollapsedOutside",
++      type: "diamond",
++      x: 0,
++      y: 100,
++      width: 50,
++      height: 50,
++      boundElements: [{ id: "movedCollapsedArrow", type: "arrow" }],
++    });
++    const connector = API.createElement({
++      id: "movedCollapsedArrow",
++      type: "arrow",
++      elbowed: true,
++      x: 50,
++      y: 125,
++      points: [pointFrom(0, 0), pointFrom(225, 100)],
++      startBinding: {
++        elementId: outside.id,
++        fixedPoint: [1, 0.5],
++        mode: "orbit",
++      },
++      endBinding: {
++        elementId: child.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    API.setElements([outside, connector, child, frame]);
++
++    h.app.setFrameCollapsed(frame.id, true);
++    const proxy = h.elements.find((element) => element.id === connector.id);
++    if (!proxy || !isArrowElement(proxy)) {
++      throw new Error("Expected proxy connector");
++    }
++    API.setSelectedElements([frame]);
++    mouse.downAt(frame.x + 10, frame.y + 10);
++    mouse.moveTo(frame.x + 170, frame.y + 10);
++    mouse.up();
++    expect(frame.x).toBe(360);
++
++    h.app.setFrameCollapsed(frame.id, false);
++    const restored = h.elements.find((element) => element.id === connector.id);
++    expect(
++      restored && isArrowElement(restored)
++        ? restored.endBinding?.elementId
++        : null,
++    ).toBe(child.id);
++    if (restored && isArrowElement(restored)) {
++      expect(restored.points[0]).toEqual(pointFrom(0, 0));
++    }
 +  });
 +
    it("should treat an element fully containing a frame as overlapping the frame", () => {

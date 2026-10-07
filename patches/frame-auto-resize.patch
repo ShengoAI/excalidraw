@@ -2632,7 +2632,7 @@ index 2efd69137..8fa272020 100644
  
              if (this.state.editingGroupId) {
                updateGroupIdsAfterEditingGroup(elementsToAdd);
-@@ -12261,7 +12600,27 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12261,7 +12600,52 @@ class App extends React.Component<AppProps, AppState> {
              this,
            );
  
@@ -2651,16 +2651,41 @@ index 2efd69137..8fa272020 100644
 +            );
 +          }
 +
++          const layoutGeometry = new Map(
++            Array.from(nextElements.values(), (element) => [
++              element.id,
++              {
++                x: element.x,
++                y: element.y,
++                width: element.width,
++                height: element.height,
++              },
++            ] as const),
++          );
 +          layoutAutoLayoutFrames(nextElements, {
 +            editingGroupId: this.state.editingGroupId,
 +          });
 +
            this.scene.replaceAllElements(nextElements);
-+          updateBoundElementsAfterAutoLayout(this.scene);
++          // A drop outside auto-layout must not reroute unrelated connectors.
++          // Only update bindings for geometry actually changed by layout.
++          for (const element of this.scene.getNonDeletedElements()) {
++            const before = layoutGeometry.get(element.id);
++            if (
++              this.state.selectedElementIds[element.id] ||
++              !before ||
++              before.x !== element.x ||
++              before.y !== element.y ||
++              before.width !== element.width ||
++              before.height !== element.height
++            ) {
++              updateBoundElements(element, this.scene);
++            }
++          }
          }
        }
  
-@@ -12279,32 +12638,15 @@ class App extends React.Component<AppProps, AppState> {
+@@ -12279,32 +12638,38 @@ class App extends React.Component<AppProps, AppState> {
          });
        }
  
@@ -2692,11 +2717,34 @@ index 2efd69137..8fa272020 100644
 -        }
 -
 +        const nextElements = this.scene.getElementsIncludingDeleted();
++        const layoutGeometry = new Map(
++          Array.from(nextElements.values(), (element) => [
++            element.id,
++            {
++              x: element.x,
++              y: element.y,
++              width: element.width,
++              height: element.height,
++            },
++          ] as const),
++        );
 +        layoutAutoLayoutFrames(nextElements, {
 +          editingGroupId: this.state.editingGroupId,
 +        });
          this.scene.replaceAllElements(nextElements);
-+        updateBoundElementsAfterAutoLayout(this.scene);
++        for (const element of this.scene.getNonDeletedElements()) {
++          const before = layoutGeometry.get(element.id);
++          if (
++            resizingElement?.id === element.id ||
++            !before ||
++            before.x !== element.x ||
++            before.y !== element.y ||
++            before.width !== element.width ||
++            before.height !== element.height
++          ) {
++            updateBoundElements(element, this.scene);
++          }
++        }
        }
  
        // Code below handles selection when element(s) weren't
@@ -3885,3 +3933,94 @@ index b13334bf7..d694f8e31 100644
    toggleSidebar: InstanceType<typeof App>["toggleSidebar"];
    getEditorInterface: () => EditorInterface;
    /**
+diff --git a/packages/element/tests/autoLayoutConnector.test.tsx b/packages/element/tests/autoLayoutConnector.test.tsx
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/packages/element/tests/autoLayoutConnector.test.tsx
+@@ -0,0 +1,85 @@
++import { Excalidraw } from "@excalidraw/excalidraw";
++import { pointFrom } from "@excalidraw/math";
++import { API } from "@excalidraw/excalidraw/tests/helpers/api";
++import { Pointer } from "@excalidraw/excalidraw/tests/helpers/ui";
++import { act, render } from "@excalidraw/excalidraw/tests/test-utils";
++
++const { h } = window;
++const mouse = new Pointer("mouse");
++
++describe("auto-layout connector updates", () => {
++  beforeEach(async () => {
++    mouse.reset();
++    await render(<Excalidraw />);
++  });
++
++  it("preserves connectors on unchanged frames when an unrelated shape moves", () => {
++    const frame = {
++      ...API.createElement({
++        id: "layout-frame",
++        type: "frame",
++        x: 300,
++        y: 100,
++        width: 200,
++        height: 200,
++        boundElements: [{ id: "frame-arrow", type: "arrow" }],
++      }),
++      autoLayout: "horizontal" as const,
++      autoLayoutHug: { horizontal: false, vertical: false },
++    };
++    const arrow = API.createElement({
++      id: "frame-arrow",
++      type: "arrow",
++      x: 100,
++      y: 150,
++      points: [pointFrom(0, 0), pointFrom(200, 0)],
++      endBinding: {
++        elementId: frame.id,
++        fixedPoint: [0, 0.5],
++        mode: "orbit",
++      },
++    });
++    const unrelated = API.createElement({
++      id: "unrelated-shape",
++      type: "rectangle",
++      x: 40,
++      y: 320,
++      width: 80,
++      height: 60,
++    });
++    API.setElements([arrow, frame, unrelated]);
++    const liveArrow = h.elements.find((element) => element.id === arrow.id);
++    if (!liveArrow || liveArrow.type !== "arrow") {
++      throw new Error("Expected arrow in scene");
++    }
++    // Bound connectors can have a user-edited route that must survive unrelated drags.
++    act(() => {
++      h.app.scene.mutateElement(liveArrow, {
++        points: [pointFrom(0, 0), pointFrom(160, -40)],
++      });
++    });
++
++    const before = h.elements.find((element) => element.id === arrow.id);
++    if (!before || before.type !== "arrow") {
++      throw new Error("Expected arrow");
++    }
++    const beforePoints = before.points.map((point) => [...point]);
++    const beforePosition = [before.x, before.y];
++
++    mouse.clickAt(40, 320);
++    mouse.downAt(80, 350);
++    mouse.moveTo(140, 390);
++    mouse.up();
++    const moved = h.elements.find((element) => element.id === unrelated.id);
++    expect(moved?.x).toBe(100);
++    expect(moved?.y).toBe(360);
++
++    const after = h.elements.find((element) => element.id === arrow.id);
++    if (!after || after.type !== "arrow") {
++      throw new Error("Expected arrow after drag");
++    }
++    expect([after.x, after.y]).toEqual(beforePosition);
++    expect(after.points).toEqual(beforePoints);
++    expect(after.endBinding?.elementId).toBe(frame.id);
++  });
++});

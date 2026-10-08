@@ -1,19 +1,16 @@
 diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
 --- a/packages/element/src/frame.ts
 +++ b/packages/element/src/frame.ts
-@@ -755,5 +755,26 @@ export const layoutFrameChildren = (
+@@ -755,5 +755,23 @@ export const layoutFrameChildren = (
    });
  
    if (!items.length) {
 -    return false;
-+    const titleHeight = getFrameTitleReservedHeight(frame);
-+    const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
-+    const nextWidth = hug.horizontal
-+      ? padding.horizontal * 2
-+      : opts.width ?? frame.width;
-+    const nextHeight = hug.vertical
-+      ? titleHeight + padding.vertical + bottomReserve
-+      : opts.height ?? frame.height;
++    // An empty frame still has a visible title and a user-defined canvas size.
++    // Shrinking it to padding alone on any scene layout also moves connectors
++    // bound to it, including connectors on previously saved diagrams.
++    const nextWidth = opts.width ?? frame.width;
++    const nextHeight = opts.height ?? frame.height;
 +
 +    if (nextWidth === frame.width && nextHeight === frame.height) {
 +      return false;

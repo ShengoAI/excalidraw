@@ -3938,9 +3938,9 @@ new file mode 100644
 index 0000000..0000000
 --- /dev/null
 +++ b/packages/element/tests/autoLayoutConnector.test.tsx
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,198 @@
 +import { Excalidraw } from "@excalidraw/excalidraw";
-+import { pointFrom } from "@excalidraw/math";
++import { type LocalPoint, pointFrom } from "@excalidraw/math";
 +import { API } from "@excalidraw/excalidraw/tests/helpers/api";
 +import { Pointer } from "@excalidraw/excalidraw/tests/helpers/ui";
 +import { act, render } from "@excalidraw/excalidraw/tests/test-utils";
@@ -3996,7 +3996,7 @@ index 0000000..0000000
 +    // Bound connectors can have a user-edited route that must survive unrelated drags.
 +    act(() => {
 +      h.app.scene.mutateElement(liveArrow, {
-+        points: [pointFrom(0, 0), pointFrom(160, -40)],
++        points: [pointFrom<LocalPoint>(0, 0), pointFrom<LocalPoint>(160, -40)],
 +      });
 +    });
 +
@@ -4022,5 +4022,118 @@ index 0000000..0000000
 +    expect([after.x, after.y]).toEqual(beforePosition);
 +    expect(after.points).toEqual(beforePoints);
 +    expect(after.endBinding?.elementId).toBe(frame.id);
++  });
++
++  it("keeps an existing child connector attached when its auto-layout parent moves", () => {
++    const left = {
++      ...API.createElement({
++        id: "existing-left-parent",
++        type: "frame",
++        x: 153,
++        y: 500,
++        width: 333,
++        height: 331,
++      }),
++      autoLayout: "vertical" as const,
++      autoLayoutHug: { horizontal: false, vertical: false },
++      name: "AWS AppSync",
++      fontSize: 32,
++    };
++    const leftChild = {
++      ...API.createElement({
++        id: "existing-left-child",
++        type: "frame",
++        x: 169,
++        y: 604,
++        width: 200,
++        height: 148,
++        frameId: left.id,
++        boundElements: [{ id: "existing-arrow", type: "arrow" as const }],
++      }),
++      autoLayout: "vertical" as const,
++      autoLayoutHug: { horizontal: true, vertical: true },
++      name: "fds asdfasdfdas",
++      fontSize: 32,
++    };
++    const right = {
++      ...API.createElement({
++        id: "existing-right-parent",
++        type: "frame",
++        x: 839,
++        y: 522,
++        width: 312,
++        height: 311,
++        boundElements: [{ id: "existing-arrow", type: "arrow" as const }],
++      }),
++      autoLayout: "vertical" as const,
++      autoLayoutHug: { horizontal: false, vertical: false },
++      name: "fsadff asdfsad",
++      fontSize: 32,
++    };
++    const rightChild = {
++      ...API.createElement({
++        id: "existing-right-child",
++        type: "frame",
++        x: 855,
++        y: 626,
++        width: 200,
++        height: 148,
++        frameId: right.id,
++        boundElements: [{ id: "existing-arrow", type: "arrow" as const }],
++      }),
++      autoLayout: "vertical" as const,
++      autoLayoutHug: { horizontal: true, vertical: true },
++      name: "asdf asdfsa",
++      fontSize: 32,
++    };
++    const arrow = API.createElement({
++      id: "existing-arrow",
++      type: "arrow",
++      elbowed: true,
++      x: 201,
++      y: 678,
++      points: [
++        pointFrom(0, 0),
++        pointFrom(327, 0),
++        pointFrom(327, 22),
++        pointFrom(653, 22),
++      ],
++      startBinding: {
++        elementId: leftChild.id,
++        mode: "orbit",
++        fixedPoint: [1, 0.5],
++      },
++      endBinding: {
++        elementId: rightChild.id,
++        mode: "orbit",
++        fixedPoint: [-0.03, 0.5],
++      },
++    });
++    API.setElements([left, leftChild, right, rightChild, arrow]);
++    mouse.downAt(right.x + 10, right.y + 10);
++    mouse.moveTo(right.x + 110, right.y + 10);
++    mouse.up();
++    const movedChild = h.elements.find(
++      (element) => element.id === rightChild.id,
++    )!;
++    const movedArrow = h.elements.find((element) => element.id === arrow.id)!;
++    const stationaryChild = h.elements.find(
++      (element) => element.id === leftChild.id,
++    )!;
++    expect(movedChild.x).toBe(955);
++    expect(movedChild.width).toBe(200);
++    expect(movedChild.height).toBe(148);
++    expect(stationaryChild.width).toBe(200);
++    expect(stationaryChild.height).toBe(148);
++    if (movedArrow.type !== "arrow") {
++      throw new Error("Expected arrow");
++    }
++    expect(movedArrow.x).toBeCloseTo(
++      stationaryChild.x + stationaryChild.width,
++      0,
++    );
++    const end = movedArrow.points[movedArrow.points.length - 1];
++    expect(Math.abs(movedArrow.x + end[0] - movedChild.x)).toBeLessThan(10);
++    expect(movedArrow.endBinding?.elementId).toBe(rightChild.id);
 +  });
 +});

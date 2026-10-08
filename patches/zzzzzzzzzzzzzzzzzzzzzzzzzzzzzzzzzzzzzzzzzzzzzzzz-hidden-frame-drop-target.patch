@@ -1,0 +1,11 @@
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -9250,6 +9250,7 @@
+       .filter(
+         (frame) =>
+           !frame.locked &&
+           !isExcludedDragTarget(frame) &&
++          !isElementHidden(frame, elementsMap) &&
+           isCursorInFrame(sceneCoords, frame, elementsMap),
+       );

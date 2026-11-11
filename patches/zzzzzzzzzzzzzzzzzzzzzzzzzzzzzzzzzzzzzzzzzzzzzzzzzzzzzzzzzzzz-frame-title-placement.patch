@@ -1,0 +1,307 @@
+diff --git a/packages/element/src/frame.ts b/packages/element/src/frame.ts
+--- a/packages/element/src/frame.ts
++++ b/packages/element/src/frame.ts
+@@ -1,9 +1,12 @@
+ import {
+   arrayToMap,
++  getFontString,
++  SHAPE_TOP_CONTENT_MIN_HEIGHT,
+   FONT_FAMILY,
+   FRAME_STYLE,
+   FRAME_TITLE_BLOCK_HEIGHT,
+   FRAME_TITLE_MAX_LINES,
++  SHAPE_FOOTER_PADDING,
+   SHAPE_FOOTER_RESERVED_HEIGHT,
+   SHAPE_TOP_RESERVED_HEIGHT,
+ } from "@excalidraw/common";
+@@ -32,6 +35,8 @@
+   getElementBounds,
+   boundsContainBounds,
+ } from "./bounds";
++import { measureText } from "./textMeasurements";
++import { wrapText } from "./textWrapping";
+ import { mutateElement } from "./mutateElement";
+ import {
+   bindBindingElementToFixedPoint,
+@@ -59,6 +64,7 @@
+   ElementsMapOrArray,
+   ExcalidrawArrowElement,
+   ExcalidrawElement,
++  ExcalidrawTextElement,
+   ExcalidrawBindableElement,
+   ExcalidrawFrameLikeElement,
+   FrameAutoLayoutAlign,
+@@ -188,6 +194,61 @@
+   frame?.textAlign === "center" || frame?.textAlign === "right"
+     ? frame.textAlign
+     : "left";
++
++/** Title placement is stored in customData so it survives scene restore. */
++export const getFrameNameVerticalAlign = (frame: ExcalidrawFrameLikeElement) =>
++  !frame.collapsed &&
++  (frame.customData?.shengoFrameTitleVerticalAlign === "middle" ||
++    frame.customData?.shengoFrameTitleVerticalAlign === "bottom")
++    ? frame.customData.shengoFrameTitleVerticalAlign
++    : "top";
++
++export const getFrameNameHeight = (
++  frame: ExcalidrawFrameLikeElement,
++  width = frame.width - FRAME_STYLE.nameInsetX * 2,
++) => {
++  const font = getFontString({
++    fontSize: getFrameNameFontSize(frame),
++    fontFamily: getFrameNameFontFamily(frame),
++    customData: frame.customData,
++  });
++  const text = wrapText(getFrameLikeTitle(frame), font, Math.max(1, width))
++    .split("\n")
++    .slice(0, FRAME_TITLE_MAX_LINES)
++    .join("\n");
++  return Math.max(
++    SHAPE_TOP_CONTENT_MIN_HEIGHT,
++    measureText(
++      text,
++      font,
++      FRAME_STYLE.nameLineHeight as ExcalidrawTextElement["lineHeight"],
++    ).height,
++  );
++};
++
++/** Plain containers only need bottom padding; entity containers have a footer. */
++export const getFrameNameBottomInset = (
++  frame: ExcalidrawFrameLikeElement & { entityId?: unknown },
++) =>
++  typeof frame.entityId === "string" && frame.entityId.length > 0
++    ? SHAPE_FOOTER_RESERVED_HEIGHT
++    : SHAPE_FOOTER_PADDING.bottom;
++
++export const getFrameNameOffsetY = (
++  frame: ExcalidrawFrameLikeElement,
++  titleHeight = getFrameNameHeight(frame),
++) => {
++  const align = getFrameNameVerticalAlign(frame);
++  const bottom = frame.height - getFrameNameBottomInset(frame) - titleHeight;
++  return align === "top"
++    ? FRAME_STYLE.nameInsetY
++    : Math.max(
++        FRAME_STYLE.nameInsetY,
++        align === "bottom"
++          ? bottom
++          : Math.min(bottom, (frame.height - titleHeight) / 2),
++      );
++};
+ 
+ export const getFrameNameColor = (
+   frame: Pick<ExcalidrawFrameLikeElement, "nameColor">,
+@@ -1026,8 +1087,11 @@
+     vertical:
+       frame.autoLayoutPadding?.vertical ?? DEFAULT_FRAME_CONTENT_PADDING_Y,
+   };
+-  const titleHeight = getFrameTitleReservedHeight(frame);
+-  const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
++  const bottomTitle = getFrameNameVerticalAlign(frame) === "bottom";
++  const titleHeight = bottomTitle ? SHAPE_TOP_RESERVED_HEIGHT : getFrameTitleReservedHeight(frame);
++  const bottomReserve =
++    (bottomTitle ? getFrameNameBottomInset(frame) : SHAPE_FOOTER_RESERVED_HEIGHT) +
++    (bottomTitle ? getFrameNameHeight(frame) + FRAME_STYLE.nameInsetY : 0);
+ 
+   // Calculate full-span bounds for the indicator
+   const fullX1 = frame.x + padding.horizontal;
+@@ -1248,8 +1312,11 @@
+     }
+   }
+ 
+-  const titleHeight = getFrameTitleReservedHeight(frame);
+-  const bottomReserve = SHAPE_FOOTER_RESERVED_HEIGHT;
++  const bottomTitle = getFrameNameVerticalAlign(frame) === "bottom";
++  const titleHeight = bottomTitle ? SHAPE_TOP_RESERVED_HEIGHT : getFrameTitleReservedHeight(frame);
++  const bottomReserve =
++    (bottomTitle ? getFrameNameBottomInset(frame) : SHAPE_FOOTER_RESERVED_HEIGHT) +
++    (bottomTitle ? getFrameNameHeight(frame) + FRAME_STYLE.nameInsetY : 0);
+   const contentFrameWidth = contentWidth + padding.horizontal * 2;
+   const contentFrameHeight =
+     contentHeight + titleHeight + padding.vertical + bottomReserve;
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -283,6 +283,8 @@
+   getFrameNameFontSize,
+   getFrameNameFontFamily,
+   getFrameNameTextAlign,
++  getFrameNameHeight,
++  getFrameNameOffsetY,
+   getCollapsedFrameHeight,
+   getAutoLayoutDropIndicator,
+   positionAutoLayoutDrop,
+@@ -2500,7 +2502,10 @@
+     const [titleSceneX, titleSceneY] = pointRotateRads(
+       pointFrom(
+         frame.x + FRAME_STYLE.nameInsetX + topLeftWidth + titleGap,
+-        frame.y + FRAME_STYLE.nameInsetY,
++        frame.y + getFrameNameOffsetY(frame, getFrameNameHeight(
++          frame, frame.width - FRAME_STYLE.nameInsetX * 2 - topLeftWidth - titleGap -
++            (this.shapeChromeSlotWidths.get(frame.id)?.topRight ?? 0),
++        )),
+       ),
+       pointFrom(frame.x + frame.width / 2, frame.y + frame.height / 2),
+       frame.angle,
+@@ -8249,12 +8254,9 @@
+         titleGap -
+         topRightWidth,
+     );
+-    const height = Math.max(
+-      SHAPE_TOP_CONTENT_MIN_HEIGHT,
+-      FRAME_STYLE.nameFontSize * FRAME_STYLE.nameLineHeight,
+-    );
++    const height = getFrameNameHeight(frame, width);
+     const localLeft = FRAME_STYLE.nameInsetX + topLeftWidth + titleGap;
+-    const localTop = FRAME_STYLE.nameInsetY;
++    const localTop = getFrameNameOffsetY(frame, height);
+     const center = pointFrom(
+       frame.x + frame.width / 2,
+       frame.y + frame.height / 2,
+diff --git a/packages/excalidraw/scene/export.ts b/packages/excalidraw/scene/export.ts
+--- a/packages/excalidraw/scene/export.ts
++++ b/packages/excalidraw/scene/export.ts
+@@ -31,6 +31,7 @@
+   getFrameLikeTitle,
+   getFrameNameColor,
+   getFrameNameFontSize,
++  getFrameNameOffsetY,
+   getFrameNameFontFamily,
+   getFrameNameTextAlign,
+   getRootElements,
+@@ -117,7 +118,7 @@
+       let textElement: Mutable<NonDeleted<ExcalidrawTextElement>> =
+         newTextElement({
+           x: element.x + FRAME_STYLE.nameInsetX,
+-          y: element.y + FRAME_STYLE.nameInsetY,
++          y: element.y + getFrameNameOffsetY(element),
+           fontFamily: getFrameNameFontFamily(element),
+           fontSize: getFrameNameFontSize(element),
+           lineHeight:
+diff --git a/packages/excalidraw/components/SearchMenu.tsx b/packages/excalidraw/components/SearchMenu.tsx
+--- a/packages/excalidraw/components/SearchMenu.tsx
++++ b/packages/excalidraw/components/SearchMenu.tsx
+@@ -29,6 +29,7 @@
+ import {
+   getDefaultFrameName,
+   getFrameNameFontSize,
++  getFrameNameOffsetY,
+   getFrameNameFontFamily,
+ } from "@excalidraw/element/frame";
+ 
+@@ -764,7 +765,7 @@
+   const matchedMetrics = measureText(matchedText, font, lineHeight);
+ 
+   const offsetX = FRAME_STYLE.nameInsetX + offset.width;
+-  const offsetY = FRAME_STYLE.nameInsetY;
++  const offsetY = getFrameNameOffsetY(frame);
+   const width = matchedMetrics.width;
+ 
+   return [
+diff --git a/packages/element/tests/frameTitlePlacement.test.ts b/packages/element/tests/frameTitlePlacement.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/element/tests/frameTitlePlacement.test.ts
+@@ -0,0 +1,100 @@
++import {
++  FRAME_STYLE,
++  SHAPE_FOOTER_PADDING,
++  SHAPE_FOOTER_RESERVED_HEIGHT,
++} from "@excalidraw/common";
++import { API } from "@excalidraw/excalidraw/tests/helpers/api";
++import {
++  getAutoLayoutDropIndicator,
++  getFrameNameHeight,
++  getFrameNameOffsetY,
++  layoutFrameChildren,
++} from "../src/frame";
++
++describe("container title placement", () => {
++  const frame = (placement = "top", overrides = {}) => ({
++    ...API.createElement({ type: "frame", width: 300, height: 300 }),
++    entityId: "entity-1",
++    customData: { shengoFrameTitleVerticalAlign: placement },
++    ...overrides,
++  });
++  it("defaults to the top inset", () => {
++    expect(getFrameNameOffsetY(frame())).toBe(FRAME_STYLE.nameInsetY);
++  });
++  it("centers an empty title block", () => {
++    const f = frame("middle");
++    expect(getFrameNameOffsetY(f)).toBe((f.height - getFrameNameHeight(f)) / 2);
++  });
++  it("keeps bottom titles above the entity footer", () => {
++    const f = frame("bottom");
++    expect(getFrameNameOffsetY(f) + getFrameNameHeight(f)).toBe(
++      f.height - SHAPE_FOOTER_RESERVED_HEIGHT,
++    );
++  });
++  it.each([undefined, null, ""])(
++    "uses bottom padding without an entity link (%s)",
++    (entityId) => {
++      const f = frame("bottom", { entityId });
++      expect(getFrameNameOffsetY(f) + getFrameNameHeight(f)).toBe(
++        f.height - SHAPE_FOOTER_PADDING.bottom,
++      );
++    },
++  );
++  it("adjusts title placement when the entity link is added or removed", () => {
++    const plain = frame("bottom", { entityId: undefined });
++    const entity = { ...plain, entityId: "entity-1" };
++    const removed = { ...entity, entityId: undefined };
++    const footerSpace =
++      SHAPE_FOOTER_RESERVED_HEIGHT - SHAPE_FOOTER_PADDING.bottom;
++    expect(getFrameNameOffsetY(plain) - getFrameNameOffsetY(entity)).toBe(
++      footerSpace,
++    );
++    expect(getFrameNameOffsetY(removed)).toBe(getFrameNameOffsetY(plain));
++  });
++  it("uses the recovered footer space for auto-layout drop indicators", () => {
++    const entity = { ...frame("bottom"), autoLayout: "horizontal" as const };
++    const plain = { ...entity, entityId: undefined };
++    const pointer = { x: 0, y: 0 };
++    const entityIndicator = getAutoLayoutDropIndicator(entity, [], pointer)!;
++    const plainIndicator = getAutoLayoutDropIndicator(plain, [], pointer)!;
++    expect(plainIndicator.y2 - entityIndicator.y2).toBe(
++      SHAPE_FOOTER_RESERVED_HEIGHT - SHAPE_FOOTER_PADDING.bottom,
++    );
++  });
++  it("fits auto-layout children without reserving a missing entity footer", () => {
++    const fit = (entityId: string | undefined) => {
++      const f = {
++        ...frame("bottom"),
++        entityId,
++        autoLayout: "vertical" as const,
++        autoLayoutHug: { horizontal: false, vertical: true },
++      };
++      const child = API.createElement({
++        type: "rectangle",
++        width: 80,
++        height: 40,
++        frameId: f.id,
++      });
++      layoutFrameChildren(f, [f, child]);
++      expect(child.y + child.height).toBeLessThanOrEqual(
++        f.y + getFrameNameOffsetY(f),
++      );
++      return f.height;
++    };
++    expect(fit("entity-1") - fit(undefined)).toBe(
++      SHAPE_FOOTER_RESERVED_HEIGHT - SHAPE_FOOTER_PADDING.bottom,
++    );
++  });
++  it("accounts for wrapped large titles", () => {
++    const f = frame("bottom", {
++      name: "First line\nSecond line",
++      fontSize: 32,
++    });
++    expect(getFrameNameHeight(f)).toBe(80);
++    expect(getFrameNameOffsetY(f)).toBe(176);
++  });
++  it("keeps collapsed and short containers at the top inset", () => {
++    expect(getFrameNameOffsetY(frame("middle", { collapsed: true }))).toBe(12);
++    expect(getFrameNameOffsetY(frame("bottom", { height: 48 }))).toBe(12);
++  });
++});

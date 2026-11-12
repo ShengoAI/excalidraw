@@ -1,0 +1,86 @@
+diff --git a/packages/element/src/dragElements.ts b/packages/element/src/dragElements.ts
+--- a/packages/element/src/dragElements.ts
++++ b/packages/element/src/dragElements.ts
+@@ -116,12 +116,21 @@
+     return;
+   }
+ 
+-  const selectedElements = _selectedElements.filter((element) => {
++  const movingElements = [
++    ...new Set([
++      ..._selectedElements,
++      ...collectFrameDescendants(
++        _selectedElements,
++        scene.getNonDeletedElements(),
++      ),
++    ]),
++  ];
++  const selectedElements = movingElements.filter((element) => {
+     if (isElbowArrow(element) && element.startBinding && element.endBinding) {
+-      const startElement = _selectedElements.find(
++      const startElement = movingElements.find(
+         (el) => el.id === element.startBinding?.elementId,
+       );
+-      const endElement = _selectedElements.find(
++      const endElement = movingElements.find(
+         (el) => el.id === element.endBinding?.elementId,
+       );
+ 
+@@ -276,6 +285,11 @@
+   scene.mutateElement(element, {
+     x: nextX,
+     y: nextY,
++    // Binding updates during earlier drag events can deform intermediate points.
++    // Translate the pointer-down geometry, just as we do for x/y.
++    ...(isArrowElement(element) && isArrowElement(originalElement)
++      ? { points: originalElement.points }
++      : {}),
+   });
+ };
+ 
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -8407,6 +8407,21 @@
+       }
+     }
+ 
++    // Arrow labels are rendered at a computed position; their stored x/y can
++    // lag behind after moving the arrow or dragging its label.
++    if (isTextElement(element) && element.containerId) {
++      const elementsMap = this.scene.getNonDeletedElementsMap();
++      const container = elementsMap.get(element.containerId);
++      if (container && isLinearElement(container)) {
++        return hitElementBoundText(
++          pointFrom(x, y),
++          container,
++          elementsMap,
++          this.getElementHitThreshold(element),
++        );
++      }
++    }
++
+     // take bound text element into consideration for hit collision as well
+     const hitBoundTextOfElement = hitElementBoundText(
+       pointFrom(x, y),
+@@ -8801,6 +8816,20 @@
+       event,
+       this.state,
+     );
++
++    // A label can overlap an elbow segment handle. Text editing takes priority.
++    if (
++      selectedElements.length === 1 &&
++      isArrowElement(selectedElements[0]) &&
++      hitElementBoundText(
++        pointFrom(sceneX, sceneY),
++        selectedElements[0],
++        this.scene.getNonDeletedElementsMap(),
++      )
++    ) {
++      this.startTextEditing({ sceneX, sceneY, container: selectedElements[0] });
++      return;
++    }
+ 
+     if (selectedElements.length === 1 && isLinearElement(selectedElements[0])) {
+       const selectedLinearElement: ExcalidrawLinearElement =
